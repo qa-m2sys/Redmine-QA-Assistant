@@ -136,6 +136,8 @@
 #qa-panel.qa-collapsed .qa-header{
     height:100%;
     box-sizing:border-box;
+    justify-content:center;
+    gap:12px;
 }
 /* Keep the title on a single line in both collapsed orientations. */
 #qa-panel.qa-collapsed .qa-title{

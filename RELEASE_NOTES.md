@@ -5,7 +5,16 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 4.1 — current
+## Version 4.2 — current
+
+### Bug fixes
+- ✅ Centered the **collapsed bar** contents. The title and header buttons are
+  now centered as a group (instead of being pushed to opposite ends) in both the
+  horizontal and vertical placements.
+
+---
+
+## Version 4.1
 
 ### Bug fixes
 - ✅ The **QA Assistant** title no longer wraps onto a second line in the

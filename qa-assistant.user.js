@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      4.1
+// @version      4.2
 // @description  Switch project, auto-fill bug template, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @grant        none
@@ -803,6 +803,8 @@
 #qa-panel.qa-collapsed .qa-header{
     height:100%;
     box-sizing:border-box;
+    justify-content:center;
+    gap:12px;
 }
 /* Keep the title on a single line in both collapsed orientations. */
 #qa-panel.qa-collapsed .qa-title{
