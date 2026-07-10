@@ -1,0 +1,197 @@
+/* QA Assistant for Redmine — injected UI styles. */
+
+#qa-panel{
+    position:fixed;
+    right:20px;
+    top:180px;
+    width:260px;
+    background:#ffffff;
+    border:1px solid #dfe3e8;
+    border-radius:12px;
+    overflow:hidden;
+    box-shadow:0 10px 30px rgba(0,0,0,.18);
+    z-index:2147483647;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    font-size:13px;
+    color:#1f2933;
+    user-select:none;
+}
+#qa-panel.qa-dragging{
+    box-shadow:0 14px 40px rgba(0,0,0,.30);
+    opacity:.97;
+}
+.qa-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background:linear-gradient(135deg,#2c3e50,#1976d2);
+    color:#fff;
+    padding:10px 12px;
+    cursor:move;
+}
+.qa-title{
+    font-weight:600;
+    letter-spacing:.2px;
+}
+.qa-collapse{
+    width:24px;
+    height:24px;
+    border:none;
+    border-radius:6px;
+    background:rgba(255,255,255,.18);
+    color:#fff;
+    font-size:16px;
+    line-height:1;
+    cursor:pointer;
+    transition:background .15s ease;
+}
+.qa-collapse:hover{ background:rgba(255,255,255,.32); }
+
+.qa-body{
+    padding:10px;
+    overflow:visible;
+    transition:padding .25s ease,opacity .2s ease;
+}
+#qa-panel.qa-collapsed .qa-body{
+    max-height:0;
+    padding-top:0;
+    padding-bottom:0;
+    opacity:0;
+    overflow:hidden;
+}
+
+.qa-section-label{
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:.6px;
+    color:#8a94a6;
+    margin:4px 2px 6px;
+    font-weight:700;
+}
+
+.qa-section-toggle{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    width:100%;
+    background:transparent;
+    border:none;
+    cursor:pointer;
+    padding:4px 2px;
+    margin:2px 0 4px;
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:.6px;
+    color:#8a94a6;
+    font-weight:700;
+    font-family:inherit;
+}
+.qa-section-toggle:hover{ color:#1976d2; }
+.qa-caret{
+    font-size:11px;
+    line-height:1;
+    transition:transform .12s ease;
+}
+.qa-tmpl-wrap[hidden]{ display:none; }
+
+.qa-btn{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    width:100%;
+    padding:9px 10px;
+    margin-bottom:6px;
+    border:1px solid #e4e7eb;
+    border-radius:8px;
+    background:#f7f9fb;
+    color:#1f2933;
+    cursor:pointer;
+    font-size:13px;
+    text-align:left;
+    transition:background .15s ease,border-color .15s ease,transform .05s ease;
+}
+.qa-btn:hover{
+    background:#1976d2;
+    border-color:#1976d2;
+    color:#fff;
+}
+.qa-btn:active{ transform:translateY(1px); }
+.qa-btn kbd{
+    font-family:inherit;
+    font-size:10px;
+    background:rgba(0,0,0,.08);
+    color:inherit;
+    border-radius:4px;
+    padding:1px 6px;
+    margin-left:8px;
+    opacity:.75;
+}
+.qa-btn:hover kbd{ background:rgba(255,255,255,.25); }
+
+.qa-danger:hover{
+    background:#e53935;
+    border-color:#e53935;
+}
+
+.qa-divider{
+    height:1px;
+    background:#eceff3;
+    margin:8px 0;
+}
+
+.qa-template-input{
+    width:100%;
+    box-sizing:border-box;
+    min-height:120px;
+    resize:vertical;
+    padding:8px 9px;
+    margin-bottom:6px;
+    border:1px solid #e4e7eb;
+    border-radius:8px;
+    background:#fbfcfd;
+    color:#1f2933;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    font-size:12px;
+    line-height:1.45;
+    user-select:text;
+    white-space:pre;
+    overflow:auto;
+    transition:border-color .15s ease,box-shadow .15s ease;
+}
+.qa-template-input:focus{
+    outline:none;
+    border-color:#1976d2;
+    box-shadow:0 0 0 3px rgba(25,118,210,.15);
+}
+
+.qa-template-actions{
+    display:flex;
+    gap:6px;
+}
+.qa-tmpl-btn{
+    justify-content:center;
+    margin-bottom:0;
+    font-size:12px;
+}
+
+#qa-toast{
+    position:fixed;
+    bottom:24px;
+    left:50%;
+    transform:translateX(-50%) translateY(20px);
+    background:#1f2933;
+    color:#fff;
+    padding:10px 18px;
+    border-radius:8px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    font-size:13px;
+    box-shadow:0 6px 20px rgba(0,0,0,.25);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .2s ease,transform .2s ease;
+    z-index:2147483647;
+}
+#qa-toast.qa-toast-show{
+    opacity:1;
+    transform:translateX(-50%) translateY(0);
+}

@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "QA Assistant for Redmine",
+  "version": "3.5.0",
+  "description": "Switch project, auto-fill bug template, draggable/collapsible panel, shortcuts, copy & clear tools.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "QA Assistant for Redmine",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://redmine.kernello.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
