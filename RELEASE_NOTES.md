@@ -5,7 +5,17 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 3.8 — current
+## Version 3.9 — current
+
+### Bug fixes
+- ✅ Fixed the **collapsed bar** looking different depending on the edge. The
+  horizontal (top/bottom) and vertical (left/right) collapsed bars now share the
+  same footprint — a 200px long side and a 44px thick side, just rotated — so
+  they look consistent in every placement.
+
+---
+
+## Version 3.8
 
 ### Improvements
 - ✅ Made the **docked pill** a consistent, larger size across all edges

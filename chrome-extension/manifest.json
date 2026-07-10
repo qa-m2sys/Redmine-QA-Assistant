@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "QA Assistant for Redmine",
-  "version": "3.8.0",
+  "version": "3.9.0",
   "description": "Switch project, auto-fill bug template, draggable/collapsible/dockable panel, shortcuts, copy & clear tools.",
   "icons": {
     "16": "icons/icon16.png",
