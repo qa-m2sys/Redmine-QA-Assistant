@@ -57,6 +57,8 @@
         project:   "qa-project",
         panelPos:  "qa-panel-pos",
         collapsed: "qa-panel-collapsed",
+        docked:    "qa-panel-docked",
+        dockPos:   "qa-panel-dock-pos",
         template:  "qa-template",
         tmplOpen:  "qa-template-open"
     };
@@ -208,8 +210,12 @@
         panel.innerHTML = `
             <div class="qa-header" id="qa-header">
                 <span class="qa-title">🚀 QA Assistant</span>
-                <button class="qa-collapse" id="qa-collapse" title="Collapse / Expand">–</button>
+                <div class="qa-header-btns">
+                    <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">📌</button>
+                    <button class="qa-hbtn qa-collapse" id="qa-collapse" title="Collapse / Expand">–</button>
+                </div>
             </div>
+            <div class="qa-dock-face" id="qa-dock-face" title="Click to restore QA Assistant">QA</div>
             <div class="qa-body" id="qa-body">
                 <div class="qa-section-label">Projects</div>
                 ${projectButtons}
@@ -293,8 +299,15 @@
             togglePanel(panel);
         });
 
+        // Dock button (only visible while collapsed) -> dock to edge
+        document.getElementById("qa-dock").addEventListener("click", (e) => {
+            e.stopPropagation();
+            setDocked(panel, true);
+        });
+
         restorePanelState(panel);
         makeDraggable(panel, document.getElementById("qa-header"));
+        makeDockDraggable(panel, document.getElementById("qa-dock-face"));
     }
 
     //////////////////////////////////////////////////////
@@ -307,6 +320,63 @@
         const btn = document.getElementById("qa-collapse");
         if (btn) btn.textContent = collapsed ? "+" : "–";
         localStorage.setItem(STORAGE.collapsed, collapsed ? "1" : "0");
+    }
+
+    //////////////////////////////////////////////////////
+    // Dock to edge
+    //////////////////////////////////////////////////////
+
+    // Snap a docked square to the nearest screen edge given its current x/y.
+    function snapDock(panel, x, y) {
+        const size = panel.offsetWidth || 44;
+        const maxX = window.innerWidth - size;
+        const maxY = window.innerHeight - size;
+        x = Math.max(0, Math.min(x, maxX));
+        y = Math.max(0, Math.min(y, maxY));
+
+        // Distance to each edge; snap to the closest.
+        const distLeft   = x;
+        const distRight  = maxX - x;
+        const distTop    = y;
+        const distBottom = maxY - y;
+        const min = Math.min(distLeft, distRight, distTop, distBottom);
+
+        if (min === distLeft)        x = 0;
+        else if (min === distRight)  x = maxX;
+        else if (min === distTop)    y = 0;
+        else                         y = maxY;
+
+        panel.style.left  = x + "px";
+        panel.style.top   = y + "px";
+        panel.style.right = "auto";
+        localStorage.setItem(STORAGE.dockPos, JSON.stringify({ left: x + "px", top: y + "px" }));
+    }
+
+    function setDocked(panel, docked) {
+        panel.classList.toggle("qa-docked", docked);
+        localStorage.setItem(STORAGE.docked, docked ? "1" : "0");
+
+        if (docked) {
+            // Restore last dock position, or snap from current position.
+            let placed = false;
+            try {
+                const pos = JSON.parse(localStorage.getItem(STORAGE.dockPos) || "null");
+                if (pos && pos.left && pos.top) {
+                    panel.style.left  = pos.left;
+                    panel.style.top   = pos.top;
+                    panel.style.right = "auto";
+                    placed = true;
+                }
+            } catch (e) { /* ignore */ }
+            if (!placed) {
+                const rect = panel.getBoundingClientRect();
+                snapDock(panel, rect.left, rect.top);
+            }
+        } else {
+            // Restore panel position and expand it.
+            restorePanelPosition(panel);
+            togglePanel(panel, false);
+        }
     }
 
     //////////////////////////////////////////////////////
@@ -350,18 +420,75 @@
         });
     }
 
-    function restorePanelState(panel) {
+    // Drag the docked square; snap to nearest edge on release. A click without
+    // meaningful movement restores the panel to its expanded state.
+    function makeDockDraggable(panel, face) {
+        let dragging = false, moved = false, offsetX = 0, offsetY = 0, startX = 0, startY = 0;
+
+        face.addEventListener("mousedown", (e) => {
+            dragging = true;
+            moved = false;
+            const rect = panel.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            startX = e.clientX;
+            startY = e.clientY;
+            panel.classList.add("qa-dragging");
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!dragging) return;
+            if (Math.abs(e.clientX - startX) > 4 || Math.abs(e.clientY - startY) > 4) moved = true;
+            let x = e.clientX - offsetX;
+            let y = e.clientY - offsetY;
+            const maxX = window.innerWidth - panel.offsetWidth;
+            const maxY = window.innerHeight - panel.offsetHeight;
+            x = Math.max(0, Math.min(x, maxX));
+            y = Math.max(0, Math.min(y, maxY));
+            panel.style.left  = x + "px";
+            panel.style.top   = y + "px";
+            panel.style.right = "auto";
+        });
+
+        document.addEventListener("mouseup", (e) => {
+            if (!dragging) return;
+            dragging = false;
+            panel.classList.remove("qa-dragging");
+            if (moved) {
+                snapDock(panel, e.clientX - offsetX, e.clientY - offsetY);
+            } else {
+                // Treated as a click -> restore the panel.
+                setDocked(panel, false);
+            }
+        });
+    }
+
+    function restorePanelPosition(panel) {
         try {
             const pos = JSON.parse(localStorage.getItem(STORAGE.panelPos) || "null");
             if (pos && pos.left && pos.top) {
-                panel.style.left = pos.left;
-                panel.style.top = pos.top;
+                panel.style.left  = pos.left;
+                panel.style.top   = pos.top;
                 panel.style.right = "auto";
+                return;
             }
         } catch (e) { /* ignore */ }
+        // Fall back to the default anchored position.
+        panel.style.left  = "auto";
+        panel.style.right = "20px";
+        panel.style.top   = "180px";
+    }
+
+    function restorePanelState(panel) {
+        restorePanelPosition(panel);
 
         if (localStorage.getItem(STORAGE.collapsed) === "1") {
             togglePanel(panel, true);
+        }
+        if (localStorage.getItem(STORAGE.docked) === "1") {
+            setDocked(panel, true);
         }
     }
 
