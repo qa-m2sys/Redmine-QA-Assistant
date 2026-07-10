@@ -96,3 +96,13 @@ layout (including the macOS Option key).
 - The panel and shortcuts are only active on `https://redmine.kernello.com/*`.
 - Keep the extension and userscript in sync when making changes — they share the
   same logic and styles.
+
+---
+
+## Author & contact
+
+Created by **Muntanuz Zaman**.
+
+Found a bug or have a suggestion for improvement? Please get in touch:
+
+- **Email:** [muntanuz@m2sys.com](mailto:muntanuz@m2sys.com)
