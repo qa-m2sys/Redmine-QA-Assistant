@@ -37,6 +37,11 @@ flexible, movable panel.
 - ✅ Toast notifications for every action (fill, copy, clear, save, reset).
 - ✅ OS/layout-independent keyboard shortcuts (work with the macOS Option key).
 
+### Distribution
+- ✅ Added `package-extension.ps1` to build a clean, versioned ZIP of the Chrome
+  extension (in `dist/`) that anyone can download and install via
+  **Load unpacked**.
+
 ---
 
 ## Version 2

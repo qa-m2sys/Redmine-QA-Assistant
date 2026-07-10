@@ -74,9 +74,41 @@ layout (including the macOS Option key).
 
 ### Chrome extension
 
+There are three ways to install, depending on how it's distributed:
+
+**A) From a downloaded ZIP (no Web Store needed)**
+
+1. Download the extension ZIP (see *Building a distributable ZIP* below) and
+   unzip it to a folder you'll keep.
+2. Open `chrome://extensions`.
+3. Enable **Developer mode** (top-right).
+4. Click **Load unpacked** and select the unzipped folder.
+
+> Chrome blocks installing standalone `.crx` files for security, so a ZIP +
+> **Load unpacked** is the simplest way to share the extension outside the
+> Chrome Web Store.
+
+**B) From this repo (for development)**
+
 1. Open `chrome://extensions`.
 2. Enable **Developer mode** (top-right).
 3. Click **Load unpacked** and select the [`chrome-extension/`](chrome-extension/) folder.
+
+**C) Chrome Web Store (one-click, if published)**
+
+If the extension is published to the Web Store, users can install it with a
+single **Add to Chrome** button. Publishing requires a one-time Chrome Web Store
+developer account and a review by Google.
+
+#### Building a distributable ZIP
+
+Run the packaging script from the repo root to produce a clean, versioned ZIP in
+`dist/` (it reads the name/version from `manifest.json` and includes only the
+runtime files):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\package-extension.ps1
+```
 
 > Icons live in `chrome-extension/icons/`. To regenerate them from a source
 > image, run `generate-icons.ps1` from the `chrome-extension` folder:
