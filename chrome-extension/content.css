@@ -61,12 +61,12 @@
 #qa-dock{ display:none; }
 #qa-panel.qa-collapsed #qa-dock{ display:flex; }
 
-/* Docked (edge-pinned) square. */
+/* Docked (edge-pinned) pill. */
 .qa-dock-face{ display:none; }
 #qa-panel.qa-docked{
-    width:44px !important;
-    height:44px;
-    border-radius:12px;
+    width:58px !important;
+    height:34px;
+    border-radius:10px;
     overflow:hidden;
     cursor:grab;
 }
@@ -76,8 +76,8 @@
     display:flex;
     align-items:center;
     justify-content:center;
-    width:44px;
-    height:44px;
+    width:58px;
+    height:34px;
     background:linear-gradient(135deg,#2c3e50,#1976d2);
     color:#fff;
     font-weight:700;
@@ -104,6 +104,16 @@
 #qa-panel.qa-docked .qa-dock-face:hover::after{ opacity:.85; }
 #qa-panel.qa-docked.qa-dragging .qa-dock-face{ cursor:grabbing; }
 
+/* On left/right edges the pill rotates to a vertical shape. */
+#qa-panel.qa-docked.qa-dock-vert{
+    width:34px !important;
+    height:58px;
+}
+#qa-panel.qa-docked.qa-dock-vert .qa-dock-face{
+    width:34px;
+    height:58px;
+}
+
 .qa-body{
     padding:10px;
     overflow:visible;
@@ -115,6 +125,28 @@
     padding-bottom:0;
     opacity:0;
     overflow:hidden;
+}
+
+/* Collapsed bar rotated to a vertical strip when pinned to a side edge. */
+#qa-panel.qa-collapsed.qa-collapsed-vert{
+    width:44px !important;
+}
+#qa-panel.qa-collapsed.qa-collapsed-vert .qa-header{
+    flex-direction:column;
+    gap:8px;
+    padding:10px 4px;
+}
+#qa-panel.qa-collapsed.qa-collapsed-vert .qa-title{
+    writing-mode:vertical-rl;
+    text-orientation:mixed;
+    letter-spacing:.3px;
+}
+/* On the left edge, flip the title so it faces the other way. */
+#qa-panel.qa-collapsed.qa-collapsed-vert.qa-collapsed-left .qa-title{
+    transform:rotate(180deg);
+}
+#qa-panel.qa-collapsed.qa-collapsed-vert .qa-header-btns{
+    flex-direction:column;
 }
 
 .qa-section-label{

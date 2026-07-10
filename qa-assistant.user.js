@@ -227,7 +227,7 @@
                 <div class="qa-section-label">Actions</div>
                 <button class="qa-btn qa-action" data-action="fill">
                     <span>✍️ Fill Template</span><kbd>F</kbd>
-                </button>
+                </button>git config --global user.name
                 <button class="qa-btn qa-action" data-action="copy">
                     <span>📋 Copy Description</span><kbd>C</kbd>
                 </button>
@@ -324,26 +324,101 @@
         const btn = document.getElementById("qa-collapse");
         if (btn) btn.textContent = collapsed ? "+" : "–";
         localStorage.setItem(STORAGE.collapsed, collapsed ? "1" : "0");
+
+        if (collapsed) {
+            // A collapsed bar sitting against the left/right edge becomes vertical.
+            snapCollapsedEdge(panel);
+        } else {
+            // Expanding restores the horizontal card; keep it fully on-screen.
+            panel.classList.remove("qa-collapsed-vert", "qa-collapsed-left");
+            clampPanel(panel);
+        }
+    }
+
+    // Keep a panel fully within the visible viewport and persist its position.
+    function clampPanel(panel) {
+        const vw = document.documentElement.clientWidth;
+        const vh = document.documentElement.clientHeight;
+        const rect = panel.getBoundingClientRect();
+        const x = Math.max(0, Math.min(rect.left, vw - panel.offsetWidth));
+        const y = Math.max(0, Math.min(rect.top, vh - panel.offsetHeight));
+        panel.style.left  = x + "px";
+        panel.style.top   = y + "px";
+        panel.style.right = "auto";
+        localStorage.setItem(STORAGE.panelPos, JSON.stringify({ left: x + "px", top: y + "px" }));
+    }
+
+    // While collapsed, snap to the left/right edge and rotate to a vertical bar
+    // when close to it; otherwise keep the horizontal bar at its current spot.
+    function snapCollapsedEdge(panel) {
+        const vw = document.documentElement.clientWidth;
+        const vh = document.documentElement.clientHeight;
+        const EDGE = 16; // px proximity that counts as "at the side edge"
+
+        const rect = panel.getBoundingClientRect();
+        let x = rect.left;
+        let y = rect.top;
+        let maxX = vw - panel.offsetWidth;
+
+        const nearLeft  = x <= EDGE;
+        const nearRight = x >= maxX - EDGE;
+        const vertical  = nearLeft || nearRight;
+
+        panel.classList.toggle("qa-collapsed-vert", vertical);
+        panel.classList.toggle("qa-collapsed-left", vertical && nearLeft);
+
+        // Re-measure after the orientation change (forces a reflow).
+        maxX = vw - panel.offsetWidth;
+        const maxY = vh - panel.offsetHeight;
+        if (nearLeft)       x = 0;
+        else if (nearRight) x = maxX;
+        x = Math.max(0, Math.min(x, maxX));
+        y = Math.max(0, Math.min(y, maxY));
+
+        panel.style.left  = x + "px";
+        panel.style.top   = y + "px";
+        panel.style.right = "auto";
+        localStorage.setItem(STORAGE.panelPos, JSON.stringify({ left: x + "px", top: y + "px", vertical }));
     }
 
     //////////////////////////////////////////////////////
     // Dock to edge
     //////////////////////////////////////////////////////
 
-    // Snap a docked square to the nearest screen edge given its current x/y.
+    // Snap a docked pill to the nearest screen edge given its current x/y.
+    // On left/right (vertical) edges the pill rotates to a vertical shape so
+    // it hugs the edge; on top/bottom (horizontal) edges it stays horizontal.
     function snapDock(panel, x, y) {
-        const size = panel.offsetWidth || 44;
-        const maxX = window.innerWidth - size;
-        const maxY = window.innerHeight - size;
-        x = Math.max(0, Math.min(x, maxX));
-        y = Math.max(0, Math.min(y, maxY));
+        // Decide the nearest edge using the current dimensions. Use the
+        // documentElement client size so the pill never slips under the
+        // vertical scrollbar (innerWidth includes it, clientWidth does not).
+        const vw = document.documentElement.clientWidth;
+        const vh = document.documentElement.clientHeight;
+        let w = panel.offsetWidth || 58;
+        let h = panel.offsetHeight || 34;
+        let maxX = vw - w;
+        let maxY = vh - h;
+        const cx = Math.max(0, Math.min(x, maxX));
+        const cy = Math.max(0, Math.min(y, maxY));
 
         // Distance to each edge; snap to the closest.
-        const distLeft   = x;
-        const distRight  = maxX - x;
-        const distTop    = y;
-        const distBottom = maxY - y;
+        const distLeft   = cx;
+        const distRight  = maxX - cx;
+        const distTop    = cy;
+        const distBottom = maxY - cy;
         const min = Math.min(distLeft, distRight, distTop, distBottom);
+
+        // Left/right edges -> vertical pill (34x58); top/bottom -> horizontal.
+        const vertical = (min === distLeft || min === distRight);
+        panel.classList.toggle("qa-dock-vert", vertical);
+
+        // Re-clamp against the post-rotation dimensions.
+        w = vertical ? 34 : 58;
+        h = vertical ? 58 : 34;
+        maxX = vw - w;
+        maxY = vh - h;
+        x = Math.max(0, Math.min(x, maxX));
+        y = Math.max(0, Math.min(y, maxY));
 
         if (min === distLeft)        x = 0;
         else if (min === distRight)  x = maxX;
@@ -353,7 +428,7 @@
         panel.style.left  = x + "px";
         panel.style.top   = y + "px";
         panel.style.right = "auto";
-        localStorage.setItem(STORAGE.dockPos, JSON.stringify({ left: x + "px", top: y + "px" }));
+        localStorage.setItem(STORAGE.dockPos, JSON.stringify({ left: x + "px", top: y + "px", vertical }));
     }
 
     function setDocked(panel, docked) {
@@ -366,6 +441,7 @@
             try {
                 const pos = JSON.parse(localStorage.getItem(STORAGE.dockPos) || "null");
                 if (pos && pos.left && pos.top) {
+                    panel.classList.toggle("qa-dock-vert", !!pos.vertical);
                     panel.style.left  = pos.left;
                     panel.style.top   = pos.top;
                     panel.style.right = "auto";
@@ -404,8 +480,8 @@
             if (!dragging) return;
             let x = e.clientX - offsetX;
             let y = e.clientY - offsetY;
-            const maxX = window.innerWidth - panel.offsetWidth;
-            const maxY = window.innerHeight - panel.offsetHeight;
+            const maxX = document.documentElement.clientWidth - panel.offsetWidth;
+            const maxY = document.documentElement.clientHeight - panel.offsetHeight;
             x = Math.max(0, Math.min(x, maxX));
             y = Math.max(0, Math.min(y, maxY));
             panel.style.left = x + "px";
@@ -417,10 +493,15 @@
             if (!dragging) return;
             dragging = false;
             panel.classList.remove("qa-dragging");
-            localStorage.setItem(STORAGE.panelPos, JSON.stringify({
-                left: panel.style.left,
-                top: panel.style.top
-            }));
+            if (panel.classList.contains("qa-collapsed")) {
+                // Re-evaluate side-edge orientation for the collapsed bar.
+                snapCollapsedEdge(panel);
+            } else {
+                localStorage.setItem(STORAGE.panelPos, JSON.stringify({
+                    left: panel.style.left,
+                    top: panel.style.top
+                }));
+            }
         });
     }
 
@@ -615,12 +696,12 @@
 #qa-dock{ display:none; }
 #qa-panel.qa-collapsed #qa-dock{ display:flex; }
 
-/* Docked (edge-pinned) square. */
+/* Docked (edge-pinned) pill. */
 .qa-dock-face{ display:none; }
 #qa-panel.qa-docked{
-    width:44px !important;
-    height:44px;
-    border-radius:12px;
+    width:58px !important;
+    height:34px;
+    border-radius:10px;
     overflow:hidden;
     cursor:grab;
 }
@@ -630,8 +711,8 @@
     display:flex;
     align-items:center;
     justify-content:center;
-    width:44px;
-    height:44px;
+    width:58px;
+    height:34px;
     background:linear-gradient(135deg,#2c3e50,#1976d2);
     color:#fff;
     font-weight:700;
@@ -658,6 +739,16 @@
 #qa-panel.qa-docked .qa-dock-face:hover::after{ opacity:.85; }
 #qa-panel.qa-docked.qa-dragging .qa-dock-face{ cursor:grabbing; }
 
+/* On left/right edges the pill rotates to a vertical shape. */
+#qa-panel.qa-docked.qa-dock-vert{
+    width:34px !important;
+    height:58px;
+}
+#qa-panel.qa-docked.qa-dock-vert .qa-dock-face{
+    width:34px;
+    height:58px;
+}
+
 .qa-body{
     padding:10px;
     overflow:visible;
@@ -669,6 +760,28 @@
     padding-bottom:0;
     opacity:0;
     overflow:hidden;
+}
+
+/* Collapsed bar rotated to a vertical strip when pinned to a side edge. */
+#qa-panel.qa-collapsed.qa-collapsed-vert{
+    width:44px !important;
+}
+#qa-panel.qa-collapsed.qa-collapsed-vert .qa-header{
+    flex-direction:column;
+    gap:8px;
+    padding:10px 4px;
+}
+#qa-panel.qa-collapsed.qa-collapsed-vert .qa-title{
+    writing-mode:vertical-rl;
+    text-orientation:mixed;
+    letter-spacing:.3px;
+}
+/* On the left edge, flip the title so it faces the other way. */
+#qa-panel.qa-collapsed.qa-collapsed-vert.qa-collapsed-left .qa-title{
+    transform:rotate(180deg);
+}
+#qa-panel.qa-collapsed.qa-collapsed-vert .qa-header-btns{
+    flex-direction:column;
 }
 
 .qa-section-label{
