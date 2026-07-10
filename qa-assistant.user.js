@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      4.0
+// @version      4.1
 // @description  Switch project, auto-fill bug template, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @grant        none
@@ -797,18 +797,22 @@
 
 /* Collapsed bar: same length (long side) & thickness in both orientations. */
 #qa-panel.qa-collapsed:not(.qa-collapsed-vert){
-    width:200px !important;
+    width:250px !important;
     height:44px;
 }
 #qa-panel.qa-collapsed .qa-header{
     height:100%;
     box-sizing:border-box;
 }
+/* Keep the title on a single line in both collapsed orientations. */
+#qa-panel.qa-collapsed .qa-title{
+    white-space:nowrap;
+}
 
 /* Collapsed bar rotated to a vertical strip when pinned to a side edge. */
 #qa-panel.qa-collapsed.qa-collapsed-vert{
     width:44px !important;
-    height:200px;
+    height:250px;
 }
 #qa-panel.qa-collapsed.qa-collapsed-vert .qa-header{
     flex-direction:column;

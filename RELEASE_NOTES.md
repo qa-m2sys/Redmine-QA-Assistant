@@ -5,7 +5,17 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 4.0 — current
+## Version 4.1 — current
+
+### Bug fixes
+- ✅ The **QA Assistant** title no longer wraps onto a second line in the
+  collapsed bar (in either orientation). The title stays on one line at full
+  size and the collapsed bar was lengthened to 250px to fit it alongside the
+  header buttons.
+
+---
+
+## Version 4.0
 
 ### New
 - ✅ **Dark mode** — toggle a dark theme from the 🌙 button in the panel header.
