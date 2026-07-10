@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      3.6
+// @version      3.7
 // @description  Switch project, auto-fill bug template, draggable/collapsible/dockable panel, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @grant        none
@@ -701,6 +701,7 @@
 #qa-panel.qa-docked{
     width:58px !important;
     height:34px;
+    border:0;
     border-radius:10px;
     overflow:hidden;
     cursor:grab;
@@ -711,8 +712,8 @@
     display:flex;
     align-items:center;
     justify-content:center;
-    width:58px;
-    height:34px;
+    width:100%;
+    height:100%;
     background:linear-gradient(135deg,#2c3e50,#1976d2);
     color:#fff;
     font-weight:700;
@@ -745,8 +746,8 @@
     height:58px;
 }
 #qa-panel.qa-docked.qa-dock-vert .qa-dock-face{
-    width:34px;
-    height:58px;
+    width:100%;
+    height:100%;
 }
 
 .qa-body{

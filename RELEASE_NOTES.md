@@ -5,7 +5,16 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 3 — current
+## Version 3.7 — current
+
+### Bug fixes
+- ✅ Fixed a thin white line that appeared on the edge of the **docked pill**
+  (caused by the panel's 1px border showing through); the docked pill now has no
+  border and its gradient fills the whole shape in both orientations.
+
+---
+
+## Version 3
 
 Building on the earlier releases, Version 3 focuses on customization and a more
 flexible, movable panel.
