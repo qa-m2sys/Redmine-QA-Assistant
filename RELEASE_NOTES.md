@@ -5,7 +5,16 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 3.7 — current
+## Version 3.8 — current
+
+### Improvements
+- ✅ Made the **docked pill** a consistent, larger size across all edges
+  (60×44 horizontal, 44×60 vertical) so left/right and top/bottom placements
+  look uniform and are easier to grab.
+
+---
+
+## Version 3.7
 
 ### Bug fixes
 - ✅ Fixed a thin white line that appeared on the edge of the **docked pill**

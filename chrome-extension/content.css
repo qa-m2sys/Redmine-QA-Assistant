@@ -64,8 +64,8 @@
 /* Docked (edge-pinned) pill. */
 .qa-dock-face{ display:none; }
 #qa-panel.qa-docked{
-    width:58px !important;
-    height:34px;
+    width:60px !important;
+    height:44px;
     border:0;
     border-radius:10px;
     overflow:hidden;
@@ -107,8 +107,8 @@
 
 /* On left/right edges the pill rotates to a vertical shape. */
 #qa-panel.qa-docked.qa-dock-vert{
-    width:34px !important;
-    height:58px;
+    width:44px !important;
+    height:60px;
 }
 #qa-panel.qa-docked.qa-dock-vert .qa-dock-face{
     width:100%;

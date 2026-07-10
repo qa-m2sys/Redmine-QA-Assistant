@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      3.7
+// @version      3.8
 // @description  Switch project, auto-fill bug template, draggable/collapsible/dockable panel, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @grant        none
@@ -394,8 +394,8 @@
         // vertical scrollbar (innerWidth includes it, clientWidth does not).
         const vw = document.documentElement.clientWidth;
         const vh = document.documentElement.clientHeight;
-        let w = panel.offsetWidth || 58;
-        let h = panel.offsetHeight || 34;
+        let w = panel.offsetWidth || 60;
+        let h = panel.offsetHeight || 44;
         let maxX = vw - w;
         let maxY = vh - h;
         const cx = Math.max(0, Math.min(x, maxX));
@@ -408,13 +408,13 @@
         const distBottom = maxY - cy;
         const min = Math.min(distLeft, distRight, distTop, distBottom);
 
-        // Left/right edges -> vertical pill (34x58); top/bottom -> horizontal.
+        // Left/right edges -> vertical pill (44x60); top/bottom -> horizontal.
         const vertical = (min === distLeft || min === distRight);
         panel.classList.toggle("qa-dock-vert", vertical);
 
         // Re-clamp against the post-rotation dimensions.
-        w = vertical ? 34 : 58;
-        h = vertical ? 58 : 34;
+        w = vertical ? 44 : 60;
+        h = vertical ? 60 : 44;
         maxX = vw - w;
         maxY = vh - h;
         x = Math.max(0, Math.min(x, maxX));
@@ -699,8 +699,8 @@
 /* Docked (edge-pinned) pill. */
 .qa-dock-face{ display:none; }
 #qa-panel.qa-docked{
-    width:58px !important;
-    height:34px;
+    width:60px !important;
+    height:44px;
     border:0;
     border-radius:10px;
     overflow:hidden;
@@ -742,8 +742,8 @@
 
 /* On left/right edges the pill rotates to a vertical shape. */
 #qa-panel.qa-docked.qa-dock-vert{
-    width:34px !important;
-    height:58px;
+    width:44px !important;
+    height:60px;
 }
 #qa-panel.qa-docked.qa-dock-vert .qa-dock-face{
     width:100%;

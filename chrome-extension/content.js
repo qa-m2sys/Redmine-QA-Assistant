@@ -390,8 +390,8 @@
         // vertical scrollbar (innerWidth includes it, clientWidth does not).
         const vw = document.documentElement.clientWidth;
         const vh = document.documentElement.clientHeight;
-        let w = panel.offsetWidth || 58;
-        let h = panel.offsetHeight || 34;
+        let w = panel.offsetWidth || 60;
+        let h = panel.offsetHeight || 44;
         let maxX = vw - w;
         let maxY = vh - h;
         const cx = Math.max(0, Math.min(x, maxX));
@@ -404,13 +404,13 @@
         const distBottom = maxY - cy;
         const min = Math.min(distLeft, distRight, distTop, distBottom);
 
-        // Left/right edges -> vertical pill (34x58); top/bottom -> horizontal.
+        // Left/right edges -> vertical pill (44x60); top/bottom -> horizontal.
         const vertical = (min === distLeft || min === distRight);
         panel.classList.toggle("qa-dock-vert", vertical);
 
         // Re-clamp against the post-rotation dimensions.
-        w = vertical ? 34 : 58;
-        h = vertical ? 58 : 34;
+        w = vertical ? 44 : 60;
+        h = vertical ? 60 : 44;
         maxX = vw - w;
         maxY = vh - h;
         x = Math.max(0, Math.min(x, maxX));
