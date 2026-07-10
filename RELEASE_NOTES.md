@@ -5,7 +5,16 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 4.2 — current
+## Version 4.3 — current
+
+### Bug fixes
+- ✅ Fixed the **docked pill** being broken (rendered as a full-size bar) after
+  the collapsed-bar sizing changes. The collapsed sizing rules no longer apply
+  while docked, so the pill keeps its correct compact size again.
+
+---
+
+## Version 4.2
 
 ### Bug fixes
 - ✅ Centered the **collapsed bar** contents. The title and header buttons are

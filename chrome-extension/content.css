@@ -129,7 +129,7 @@
 }
 
 /* Collapsed bar: same length (long side) & thickness in both orientations. */
-#qa-panel.qa-collapsed:not(.qa-collapsed-vert){
+#qa-panel.qa-collapsed:not(.qa-collapsed-vert):not(.qa-docked){
     width:250px !important;
     height:44px;
 }
@@ -145,7 +145,7 @@
 }
 
 /* Collapsed bar rotated to a vertical strip when pinned to a side edge. */
-#qa-panel.qa-collapsed.qa-collapsed-vert{
+#qa-panel.qa-collapsed.qa-collapsed-vert:not(.qa-docked){
     width:44px !important;
     height:250px;
 }
