@@ -5,7 +5,16 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 3.9 — current
+## Version 4.0 — current
+
+### New
+- ✅ **Dark mode** — toggle a dark theme from the 🌙 button in the panel header.
+  Your choice is remembered, and by default it follows your operating system's
+  light/dark preference.
+
+---
+
+## Version 3.9
 
 ### Bug fixes
 - ✅ Fixed the **collapsed bar** looking different depending on the edge. The

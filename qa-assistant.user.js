@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      3.9
-// @description  Switch project, auto-fill bug template, draggable/collapsible/dockable panel, shortcuts, copy & clear tools
+// @version      4.0
+// @description  Switch project, auto-fill bug template, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @grant        none
 // ==/UserScript==
@@ -64,7 +64,8 @@
         docked:    "qa-panel-docked",
         dockPos:   "qa-panel-dock-pos",
         template:  "qa-template",
-        tmplOpen:  "qa-template-open"
+        tmplOpen:  "qa-template-open",
+        theme:     "qa-theme"
     };
 
     const MAX_AUTOFILL_TRIES = 40; // ~12s at 300ms
@@ -77,6 +78,29 @@
 
     function saveTemplate(text) {
         localStorage.setItem(STORAGE.template, text);
+    }
+
+    // Returns "dark" or "light". Falls back to the OS preference when unset.
+    function getTheme() {
+        const saved = localStorage.getItem(STORAGE.theme);
+        if (saved === "dark" || saved === "light") return saved;
+        return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+    }
+
+    function applyTheme(panel, theme) {
+        const dark = theme === "dark";
+        panel.classList.toggle("qa-dark", dark);
+        const btn = document.getElementById("qa-theme");
+        if (btn) {
+            btn.textContent = dark ? "☀️" : "🌙";
+            btn.title = dark ? "Switch to light mode" : "Switch to dark mode";
+        }
+    }
+
+    function toggleTheme(panel) {
+        const theme = panel.classList.contains("qa-dark") ? "light" : "dark";
+        localStorage.setItem(STORAGE.theme, theme);
+        applyTheme(panel, theme);
     }
 
     //////////////////////////////////////////////////////
@@ -215,6 +239,7 @@
             <div class="qa-header" id="qa-header">
                 <span class="qa-title">🚀 QA Assistant</span>
                 <div class="qa-header-btns">
+                    <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">🌙</button>
                     <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">📌</button>
                     <button class="qa-hbtn qa-collapse" id="qa-collapse" title="Collapse / Expand">–</button>
                 </div>
@@ -308,6 +333,13 @@
             e.stopPropagation();
             setDocked(panel, true);
         });
+
+        // Theme toggle (light / dark)
+        document.getElementById("qa-theme").addEventListener("click", (e) => {
+            e.stopPropagation();
+            toggleTheme(panel);
+        });
+        applyTheme(panel, getTheme());
 
         restorePanelState(panel);
         makeDraggable(panel, document.getElementById("qa-header"));
@@ -467,7 +499,7 @@
         let dragging = false, offsetX = 0, offsetY = 0;
 
         handle.addEventListener("mousedown", (e) => {
-            if (e.target.closest("#qa-collapse")) return;
+            if (e.target.closest(".qa-hbtn")) return;
             dragging = true;
             const rect = panel.getBoundingClientRect();
             offsetX = e.clientX - rect.left;
@@ -930,6 +962,41 @@
 #qa-toast.qa-toast-show{
     opacity:1;
     transform:translateX(-50%) translateY(0);
+}
+
+/* ---------- Dark mode ---------- */
+#qa-panel.qa-dark{
+    background:#1f2933;
+    border-color:#3a4553;
+    color:#e4e7eb;
+}
+#qa-panel.qa-dark .qa-section-label,
+#qa-panel.qa-dark .qa-section-toggle{ color:#9aa5b1; }
+#qa-panel.qa-dark .qa-section-toggle:hover{ color:#4a9eff; }
+#qa-panel.qa-dark .qa-btn{
+    background:#2c3846;
+    border-color:#3a4553;
+    color:#e4e7eb;
+}
+#qa-panel.qa-dark .qa-btn:hover{
+    background:#1976d2;
+    border-color:#1976d2;
+    color:#fff;
+}
+#qa-panel.qa-dark .qa-btn kbd{ background:rgba(255,255,255,.12); }
+#qa-panel.qa-dark .qa-danger:hover{
+    background:#e53935;
+    border-color:#e53935;
+}
+#qa-panel.qa-dark .qa-divider{ background:#3a4553; }
+#qa-panel.qa-dark .qa-template-input{
+    background:#263340;
+    border-color:#3a4553;
+    color:#e4e7eb;
+}
+#qa-panel.qa-dark .qa-template-input:focus{
+    border-color:#4a9eff;
+    box-shadow:0 0 0 3px rgba(74,158,255,.2);
 }
 `;
     document.head.appendChild(style);

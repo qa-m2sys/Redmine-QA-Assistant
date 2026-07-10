@@ -45,8 +45,11 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
   pinned to any screen edge. Drag the pill to reposition it; it snaps to the
   nearest edge and rotates to match (vertical on left/right, horizontal on
   top/bottom). Click the pill to restore the panel.
-- **Persistent state** — Panel position, collapsed/docked state, dock position
-  and your custom template all persist across page loads.
+- **Dark mode** — toggle a dark theme from the 🌙 button in the panel header. Your
+  choice is remembered and, by default, follows your operating system's
+  light/dark preference.
+- **Persistent state** — Panel position, collapsed/docked state, dock position,
+  theme, and your custom template all persist across page loads.
 - **Scrollbar-aware placement** — The panel and pill stay fully on-screen and
   never slip underneath the browser's scrollbar.
 

@@ -60,7 +60,8 @@
         docked:    "qa-panel-docked",
         dockPos:   "qa-panel-dock-pos",
         template:  "qa-template",
-        tmplOpen:  "qa-template-open"
+        tmplOpen:  "qa-template-open",
+        theme:     "qa-theme"
     };
 
     const MAX_AUTOFILL_TRIES = 40; // ~12s at 300ms
@@ -73,6 +74,29 @@
 
     function saveTemplate(text) {
         localStorage.setItem(STORAGE.template, text);
+    }
+
+    // Returns "dark" or "light". Falls back to the OS preference when unset.
+    function getTheme() {
+        const saved = localStorage.getItem(STORAGE.theme);
+        if (saved === "dark" || saved === "light") return saved;
+        return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+    }
+
+    function applyTheme(panel, theme) {
+        const dark = theme === "dark";
+        panel.classList.toggle("qa-dark", dark);
+        const btn = document.getElementById("qa-theme");
+        if (btn) {
+            btn.textContent = dark ? "☀️" : "🌙";
+            btn.title = dark ? "Switch to light mode" : "Switch to dark mode";
+        }
+    }
+
+    function toggleTheme(panel) {
+        const theme = panel.classList.contains("qa-dark") ? "light" : "dark";
+        localStorage.setItem(STORAGE.theme, theme);
+        applyTheme(panel, theme);
     }
 
     //////////////////////////////////////////////////////
@@ -211,6 +235,7 @@
             <div class="qa-header" id="qa-header">
                 <span class="qa-title">🚀 QA Assistant</span>
                 <div class="qa-header-btns">
+                    <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">🌙</button>
                     <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">📌</button>
                     <button class="qa-hbtn qa-collapse" id="qa-collapse" title="Collapse / Expand">–</button>
                 </div>
@@ -304,6 +329,13 @@
             e.stopPropagation();
             setDocked(panel, true);
         });
+
+        // Theme toggle (light / dark)
+        document.getElementById("qa-theme").addEventListener("click", (e) => {
+            e.stopPropagation();
+            toggleTheme(panel);
+        });
+        applyTheme(panel, getTheme());
 
         restorePanelState(panel);
         makeDraggable(panel, document.getElementById("qa-header"));
@@ -463,7 +495,7 @@
         let dragging = false, offsetX = 0, offsetY = 0;
 
         handle.addEventListener("mousedown", (e) => {
-            if (e.target.closest("#qa-collapse")) return;
+            if (e.target.closest(".qa-hbtn")) return;
             dragging = true;
             const rect = panel.getBoundingClientRect();
             offsetX = e.clientX - rect.left;
