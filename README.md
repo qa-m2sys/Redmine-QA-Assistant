@@ -15,6 +15,8 @@ It ships in **two interchangeable forms** so you can use whichever fits your set
 
 Both versions share the exact same features and UI.
 
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each version.
+
 ---
 
 ## Features

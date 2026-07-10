@@ -1,0 +1,59 @@
+# Release Notes
+
+A summary of what changed in each version of **QA Assistant for Redmine**.
+For features and usage, see the [README](README.md).
+
+---
+
+## Version 3 — current
+
+Building on the earlier releases, Version 3 focuses on customization and a more
+flexible, movable panel.
+
+### Description templates
+- ✅ Added an **editable description template** — expand the *Description
+  Template* section to write your own template.
+- ✅ **Save** stores your template locally; **Reset** restores the shipped
+  default.
+- ✅ Your custom template is used for **Fill**, **Copy**, and **auto-fill**.
+
+### Panel & docking
+- ✅ **Draggable panel** — move the panel anywhere; its position is remembered.
+- ✅ **Collapsible panel** — collapse it to a compact bar.
+- ✅ **Edge-aware collapsed bar** — when dragged to the **left or right edge**,
+  the collapsed bar rotates into a vertical strip that hugs the edge; the title
+  flips so it stays readable on the left edge. Anywhere else it stays a
+  horizontal bar.
+- ✅ **Dock to edge** — dock the collapsed panel into a small **pill** pinned to
+  any screen edge. Drag it to reposition; it snaps to the nearest edge and
+  rotates to match (vertical on left/right, horizontal on top/bottom). Click the
+  pill to restore the panel.
+- ✅ **Persistent state** — panel position, collapsed/docked state, dock
+  position, and your custom template persist across page loads.
+
+### Fixes & polish
+- ✅ **Scrollbar-aware placement** — the panel and pill no longer slip beneath
+  the browser's scrollbar and stay fully on-screen.
+- ✅ Toast notifications for every action (fill, copy, clear, save, reset).
+- ✅ OS/layout-independent keyboard shortcuts (work with the macOS Option key).
+
+---
+
+## Version 2
+
+- ✅ Switches to the correct project automatically.
+- ✅ Fills Tracker, Status, Priority, Assignee.
+- ✅ Inserts the description template.
+
+---
+
+## Version 1
+
+- ✅ Floating panel that stays visible.
+- ✅ One-click buttons for:
+  - 🌐 Web
+  - ⚙️ Backend
+  - 🍎 iOS
+  - 🤖 Android
+- ✅ Sets Tracker = Bug, Status = New, Priority = Normal, Assignee = Correct Team.
+- ✅ Fills the description template.
