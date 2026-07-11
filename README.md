@@ -24,6 +24,10 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
 - **One-click project switch** — Jump to the New Bug form for Web, Backend, iOS,
   or Android. The correct Bug tracker form is requested server-side, avoiding
   Redmine's stuck "Loading…" spinner.
+- **Agile boards** — Open any project's agile board (Web, Backend, iOS, Android)
+  in a new tab from the *Agile Boards* section, so your current page and panel
+  stay put. Each button opens that project's **current sprint** board, and if
+  you navigate to a different board it remembers and reopens your last-viewed one.
 - **Auto-fill after navigation** — After switching projects, the bug template,
   tracker (Bug), status (New), priority (Normal), and the team assignee are
   filled in automatically once the form loads.
@@ -66,6 +70,10 @@ layout (including the macOS Option key).
 | `Alt` + `2` | Switch to **Backend** new-bug form |
 | `Alt` + `3` | Switch to **iOS** new-bug form |
 | `Alt` + `4` | Switch to **Android** new-bug form |
+| `Alt` + `Shift` + `1` | Open the **Web** agile board |
+| `Alt` + `Shift` + `2` | Open the **Backend** agile board |
+| `Alt` + `Shift` + `3` | Open the **iOS** agile board |
+| `Alt` + `Shift` + `4` | Open the **Android** agile board |
 | `Alt` + `F` | **Fill** the bug template into the current form |
 | `Alt` + `C` | **Copy** the description template to the clipboard |
 | `Alt` + `X` | **Clear** the form (subject + description) |

@@ -5,7 +5,55 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 4.7 — current
+## Version 4.12 — current
+
+### Improvements (accessibility)
+- ✅ Agile board buttons now have descriptive labels/tooltips (e.g. “Web agile
+  board”) for screen readers.
+- ✅ Added a visible keyboard **focus ring** to the panel's buttons and toggles.
+- ✅ Added **Alt+Shift+1..4** shortcuts to open each project's agile board
+  (parallel to Alt+1..4 for switching projects), with ⇧1..⇧4 hints on the
+  buttons.
+
+---
+
+## Version 4.11
+
+### Improvements
+- ✅ **Agile Boards** now open each project's **current sprint** board (filtered
+  by target version) instead of the default board.
+- ✅ The panel now **remembers the last agile board you viewed** per project and
+  reopens it next time (falling back to the current sprint).
+
+---
+
+## Version 4.10
+
+### Improvements
+- ✅ The expanded panel now **scrolls internally** when its content is tall. The
+  body is capped to 75% of the viewport height with a scrollbar, so the panel
+  never runs off the screen as more sections are added.
+
+---
+
+## Version 4.9
+
+### Improvements
+- ✅ The **Agile Boards** section is now collapsible (like the Description
+  Template section), with its open/closed state remembered across page loads.
+
+---
+
+## Version 4.8
+
+### New
+- ✅ Added an **Agile Boards** section to the expanded panel with one button per
+  project (Web, Backend, iOS, Android). Clicking a button opens that project's
+  agile board in a new tab, keeping your current page and panel intact.
+
+---
+
+## Version 4.7
 
 ### Improvements
 - ✅ Slimmed the **collapsed vertical bar** from 44px to 40px wide (with a little

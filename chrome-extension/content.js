@@ -16,10 +16,10 @@
     // "Affected version") are present on load, without any client-side AJAX
     // reload (which caused a stuck "Loading..." spinner).
     const PROJECTS = {
-        web:     { label: "🌐 Web",     url: "/projects/web-app-version-2/issues/new?issue[tracker_id]=1", assignee: "CloudApper Web Team" },
-        backend: { label: "⚙️ Backend", url: "/projects/backend/issues/new?issue[tracker_id]=1",     assignee: "CloudApper Backend Team" },
-        ios:     { label: "🍎 iOS",     url: "/projects/ios-app/issues/new?issue[tracker_id]=1",     assignee: "CloudApper iOS Team" },
-        android: { label: "🤖 Android", url: "/projects/android-app/issues/new?issue[tracker_id]=1", assignee: "CloudApper Android Team" }
+        web:     { label: "🌐 Web",     url: "/projects/web-app-version-2/issues/new?issue[tracker_id]=1", board: "/projects/web-app-version-2/agile/board", version: "2216", assignee: "CloudApper Web Team" },
+        backend: { label: "⚙️ Backend", url: "/projects/backend/issues/new?issue[tracker_id]=1",     board: "/projects/backend/agile/board",     version: "2215", assignee: "CloudApper Backend Team" },
+        ios:     { label: "🍎 iOS",     url: "/projects/ios-app/issues/new?issue[tracker_id]=1",     board: "/projects/ios-app/agile/board",     version: "2163", assignee: "CloudApper iOS Team" },
+        android: { label: "🤖 Android", url: "/projects/android-app/issues/new?issue[tracker_id]=1", board: "/projects/android-app/agile/board", version: "2206", assignee: "CloudApper Android Team" }
     };
 
     // Order in which project buttons are rendered, and their keyboard shortcut digit.
@@ -61,6 +61,8 @@
         dockPos:   "qa-panel-dock-pos",
         template:  "qa-template",
         tmplOpen:  "qa-template-open",
+        boardsOpen:"qa-boards-open",
+        lastBoard: "qa-last-board",
         theme:     "qa-theme"
     };
 
@@ -214,6 +216,50 @@
         window.location.href = PROJECTS[project].url;
     }
 
+    // Build a board URL filtered to the project's current sprint (target version).
+    function boardUrl(project) {
+        const p = PROJECTS[project];
+        if (!p || !p.board) return null;
+        if (!p.version) return p.board;
+        const q = "set_filter=1"
+            + "&f%5B%5D=fixed_version_id"
+            + "&op%5Bfixed_version_id%5D=%3D"
+            + "&v%5Bfixed_version_id%5D%5B%5D=" + encodeURIComponent(p.version);
+        return p.board + "?" + q;
+    }
+
+    // Per-project map of the last agile board the user viewed.
+    function getLastBoards() {
+        try {
+            return JSON.parse(localStorage.getItem(STORAGE.lastBoard) || "{}") || {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    // If we're on a project's agile board, remember its exact URL so the panel
+    // button reopens that board next time (falling back to the current sprint).
+    function rememberCurrentBoard() {
+        const m = location.pathname.match(/^\/projects\/([^/]+)\/agile\/board/);
+        if (!m) return;
+        const slug = m[1];
+        const key = PROJECT_ORDER.find(k => PROJECTS[k].board === `/projects/${slug}/agile/board`);
+        if (!key) return;
+        const boards = getLastBoards();
+        boards[key] = location.pathname + location.search;
+        localStorage.setItem(STORAGE.lastBoard, JSON.stringify(boards));
+    }
+
+    // Open a project's agile board in a new tab so the panel/page is preserved.
+    // Prefers the last board the user viewed for that project; otherwise opens
+    // the current sprint (target version) board.
+    function gotoBoard(project) {
+        const p = PROJECTS[project];
+        if (!p || !p.board) return;
+        const url = getLastBoards()[project] || boardUrl(project);
+        window.open(url, "_blank", "noopener");
+    }
+
     //////////////////////////////////////////////////////
     // Floating Panel
     //////////////////////////////////////////////////////
@@ -228,6 +274,15 @@
             const p = PROJECTS[key];
             return `<button class="qa-btn qa-project-btn" data-project="${key}">
                         <span>${p.label}</span><kbd>${i + 1}</kbd>
+                    </button>`;
+        }).join("");
+
+        const boardButtons = PROJECT_ORDER.map((key, i) => {
+            const p = PROJECTS[key];
+            const name = p.label.replace(/^\S+\s+/, ""); // label without the emoji
+            return `<button class="qa-btn qa-board-btn" data-board="${key}"
+                        title="${name} agile board" aria-label="${name} agile board">
+                        <span>${p.label}</span><kbd>⇧${i + 1}</kbd>
                     </button>`;
         }).join("");
 
@@ -256,6 +311,14 @@
                     <span>🧹 Clear Form</span><kbd>X</kbd>
                 </button>
                 <div class="qa-divider"></div>
+                <button class="qa-section-toggle" id="qa-boards-toggle" type="button" aria-expanded="false">
+                    <span>Agile Boards</span>
+                    <span class="qa-caret" id="qa-boards-caret">▸</span>
+                </button>
+                <div class="qa-tmpl-wrap" id="qa-boards-wrap" hidden>
+                    ${boardButtons}
+                </div>
+                <div class="qa-divider"></div>
                 <button class="qa-section-toggle" id="qa-tmpl-toggle" type="button" aria-expanded="false">
                     <span>Description Template</span>
                     <span class="qa-caret" id="qa-tmpl-caret">▸</span>
@@ -277,6 +340,11 @@
         // Project buttons
         panel.querySelectorAll(".qa-project-btn").forEach(btn => {
             btn.addEventListener("click", () => gotoProject(btn.dataset.project));
+        });
+
+        // Agile board buttons (open the project's board in a new tab)
+        panel.querySelectorAll(".qa-board-btn").forEach(btn => {
+            btn.addEventListener("click", () => gotoBoard(btn.dataset.board));
         });
 
         // Action buttons
@@ -302,6 +370,21 @@
             tmplInput.value = DEFAULT_DESCRIPTION;
             toast("Template reset to default");
         });
+
+        // Agile Boards collapse (hidden until user expands)
+        const boardsToggle = panel.querySelector("#qa-boards-toggle");
+        const boardsWrap   = panel.querySelector("#qa-boards-wrap");
+        const boardsCaret  = panel.querySelector("#qa-boards-caret");
+        function setBoardsOpen(open) {
+            boardsWrap.hidden = !open;
+            boardsCaret.textContent = open ? "▾" : "▸";
+            boardsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+            localStorage.setItem(STORAGE.boardsOpen, open ? "1" : "0");
+        }
+        boardsToggle.addEventListener("click", () => {
+            setBoardsOpen(boardsWrap.hidden);
+        });
+        setBoardsOpen(localStorage.getItem(STORAGE.boardsOpen) === "1");
 
         // Description Template collapse (hidden until user expands)
         const tmplToggle = panel.querySelector("#qa-tmpl-toggle");
@@ -607,7 +690,8 @@
 
     //////////////////////////////////////////////////////
     // Keyboard Shortcuts (OS-independent via e.code)
-    //   Alt+1..4 -> switch project
+    //   Alt+1..4       -> switch project
+    //   Alt+Shift+1..4 -> open that project's agile board
     //   Alt+F    -> fill template
     //   Alt+C    -> copy description
     //   Alt+X    -> clear form
@@ -622,13 +706,17 @@
 
             const code = e.code; // physical key, layout/OS independent
 
-            // Project switch by digit (Digit1..DigitN or Numpad1..NumpadN)
+            // Digit -> switch project; with Shift -> open that project's board.
             const digitMatch = code.match(/^(?:Digit|Numpad)([1-9])$/);
             if (digitMatch) {
                 const idx = parseInt(digitMatch[1], 10);
                 if (idx >= 1 && idx <= PROJECT_ORDER.length) {
                     e.preventDefault();
-                    gotoProject(PROJECT_ORDER[idx - 1]);
+                    if (e.shiftKey) {
+                        gotoBoard(PROJECT_ORDER[idx - 1]);
+                    } else {
+                        gotoProject(PROJECT_ORDER[idx - 1]);
+                    }
                 }
                 return;
             }
@@ -692,6 +780,7 @@
         createPanel();
         initShortcuts();
         autoFillIfNeeded();
+        rememberCurrentBoard();
     }
 
     // The content script runs at document_idle, but guard against both timings.

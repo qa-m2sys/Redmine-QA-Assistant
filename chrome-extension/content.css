@@ -117,7 +117,9 @@
 
 .qa-body{
     padding:10px;
-    overflow:visible;
+    max-height:75vh;
+    overflow-y:auto;
+    overflow-x:hidden;
     transition:padding .25s ease,opacity .2s ease;
 }
 #qa-panel.qa-collapsed .qa-body{
@@ -219,6 +221,12 @@
     color:#fff;
 }
 .qa-btn:active{ transform:translateY(1px); }
+.qa-btn:focus-visible,
+.qa-hbtn:focus-visible,
+.qa-section-toggle:focus-visible{
+    outline:2px solid #1976d2;
+    outline-offset:2px;
+}
 .qa-btn kbd{
     font-family:inherit;
     font-size:10px;
@@ -308,6 +316,9 @@
 #qa-panel.qa-dark .qa-section-label,
 #qa-panel.qa-dark .qa-section-toggle{ color:#9aa5b1; }
 #qa-panel.qa-dark .qa-section-toggle:hover{ color:#4a9eff; }
+#qa-panel.qa-dark .qa-btn:focus-visible,
+#qa-panel.qa-dark .qa-hbtn:focus-visible,
+#qa-panel.qa-dark .qa-section-toggle:focus-visible{ outline-color:#4a9eff; }
 #qa-panel.qa-dark .qa-btn{
     background:#2c3846;
     border-color:#3a4553;
