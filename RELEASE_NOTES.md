@@ -5,7 +5,44 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 4.3 — current
+## Version 4.7 — current
+
+### Improvements
+- ✅ Slimmed the **collapsed vertical bar** from 44px to 40px wide (with a little
+  extra padding for breathing room) and lengthened it to 370px so nothing is
+  cropped.
+
+---
+
+## Version 4.6
+
+### Bug fixes
+- ✅ Increased the **collapsed vertical bar** length to 350px so all stacked
+  header buttons fit without any being cropped.
+
+---
+
+## Version 4.5
+
+### Bug fixes
+- ✅ Lengthened the **collapsed vertical bar** to 300px so the upright title has
+  space at the top and the stacked header buttons are no longer cropped at the
+  bottom.
+
+---
+
+## Version 4.4
+
+### Improvements
+- ✅ The **collapsed vertical bar** (left/right edge) now shows the title as
+  upright, top-to-bottom stacked characters instead of sideways rotated text,
+  so it reads naturally without tilting your head. The left-edge title flip is
+  no longer needed and was removed, and the vertical bar was lengthened slightly
+  (270px) so the text never clips.
+
+---
+
+## Version 4.3
 
 ### Bug fixes
 - ✅ Fixed the **docked pill** being broken (rendered as a full-size bar) after
