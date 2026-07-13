@@ -21,9 +21,9 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
 
 ## Features
 
-- **One-click project switch** — Jump to the New Bug form for Web, Backend, iOS,
-  or Android. The correct Bug tracker form is requested server-side, avoiding
-  Redmine's stuck "Loading…" spinner.
+- **Report a bug in one click** — From the *Report Bug* section, open the New Bug
+  form for Web, Backend, iOS, or Android in a new tab. The correct Bug tracker
+  form is requested server-side, avoiding Redmine's stuck "Loading…" spinner.
 - **Agile boards** — Open any project's agile board (Web, Backend, iOS, Android)
   in a new tab from the *Agile Boards* section, so your current page and panel
   stay put. Each button opens that project's **current sprint** board, and if

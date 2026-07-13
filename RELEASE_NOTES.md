@@ -5,7 +5,38 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 4.12 — current
+## Version 4.15 — current
+
+### Bug fixes
+- ✅ Fixed the button text getting **underlined on hover** (the Redmine theme's
+  `a:hover` style was leaking onto the new link-based buttons).
+
+---
+
+## Version 4.14
+
+### Improvements (accessibility)
+- ✅ The **Report Bug** and **Agile Boards** buttons are now real links, so
+  **middle-click / Ctrl-click / right-click “open in new tab”** and keyboard
+  activation all work natively.
+- ✅ Report Bug links carry the project via a `#qa=<project>` URL marker, so
+  auto-fill runs reliably in the newly opened tab regardless of how it's opened.
+- ✅ Agile board links refresh their target on click to the last-viewed / current
+  sprint board.
+
+---
+
+## Version 4.13
+
+### Improvements
+- ✅ The **Report Bug** buttons (formerly “Projects”) now open the New Bug form in
+  a **new tab**, so your current page stays put. Auto-fill still runs in the new
+  tab.
+- ✅ Renamed the **Projects** section to **Report Bug**.
+
+---
+
+## Version 4.12
 
 ### Improvements (accessibility)
 - ✅ Agile board buttons now have descriptive labels/tooltips (e.g. “Web agile

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      4.12
+// @version      4.15
 // @description  Switch project, auto-fill bug template, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @grant        none
@@ -216,8 +216,18 @@
 
     function gotoProject(project) {
         if (!PROJECTS[project]) return;
-        sessionStorage.setItem(STORAGE.project, project);
-        window.location.href = PROJECTS[project].url;
+        // The #qa=<project> marker tells the new tab which project to auto-fill.
+        window.open(PROJECTS[project].url + "#qa=" + project, "_blank", "noopener");
+    }
+
+    // If the URL carries a #qa=<project> marker (from a Report Bug link/shortcut
+    // opened in a new tab), record it so auto-fill and manual Fill know the project.
+    function consumeProjectHash() {
+        const m = location.hash.match(/(?:^#|[#&])qa=([a-z]+)/i);
+        if (m && PROJECTS[m[1]]) {
+            sessionStorage.setItem(STORAGE.project, m[1]);
+            history.replaceState(null, "", location.pathname + location.search);
+        }
     }
 
     // Build a board URL filtered to the project's current sprint (target version).
@@ -276,18 +286,21 @@
 
         const projectButtons = PROJECT_ORDER.map((key, i) => {
             const p = PROJECTS[key];
-            return `<button class="qa-btn qa-project-btn" data-project="${key}">
+            return `<a class="qa-btn qa-project-btn" data-project="${key}"
+                        href="${p.url}#qa=${key}" target="_blank" rel="noopener">
                         <span>${p.label}</span><kbd>${i + 1}</kbd>
-                    </button>`;
+                    </a>`;
         }).join("");
 
         const boardButtons = PROJECT_ORDER.map((key, i) => {
             const p = PROJECTS[key];
             const name = p.label.replace(/^\S+\s+/, ""); // label without the emoji
-            return `<button class="qa-btn qa-board-btn" data-board="${key}"
+            const href = getLastBoards()[key] || boardUrl(key);
+            return `<a class="qa-btn qa-board-btn" data-board="${key}"
+                        href="${href}" target="_blank" rel="noopener"
                         title="${name} agile board" aria-label="${name} agile board">
                         <span>${p.label}</span><kbd>⇧${i + 1}</kbd>
-                    </button>`;
+                    </a>`;
         }).join("");
 
         panel.innerHTML = `
@@ -301,7 +314,7 @@
             </div>
             <div class="qa-dock-face" id="qa-dock-face" title="Click to restore QA Assistant">QA</div>
             <div class="qa-body" id="qa-body">
-                <div class="qa-section-label">Projects</div>
+                <div class="qa-section-label">Report Bug</div>
                 ${projectButtons}
                 <div class="qa-divider"></div>
                 <div class="qa-section-label">Actions</div>
@@ -341,14 +354,16 @@
 
         document.body.appendChild(panel);
 
-        // Project buttons
-        panel.querySelectorAll(".qa-project-btn").forEach(btn => {
-            btn.addEventListener("click", () => gotoProject(btn.dataset.project));
-        });
+        // Report Bug links are plain <a target="_blank"> elements; the new tab
+        // reads the #qa=<project> marker in the URL to run auto-fill.
 
-        // Agile board buttons (open the project's board in a new tab)
-        panel.querySelectorAll(".qa-board-btn").forEach(btn => {
-            btn.addEventListener("click", () => gotoBoard(btn.dataset.board));
+        // Agile board links: refresh the href just before navigation so it points
+        // at the last-viewed board (or the current sprint) for that project.
+        // mousedown covers left / middle / ctrl-click.
+        panel.querySelectorAll(".qa-board-btn").forEach(a => {
+            a.addEventListener("mousedown", () => {
+                a.href = getLastBoards()[a.dataset.board] || boardUrl(a.dataset.board);
+            });
         });
 
         // Action buttons
@@ -968,12 +983,19 @@
     cursor:pointer;
     font-size:13px;
     text-align:left;
+    text-decoration:none;
     transition:background .15s ease,border-color .15s ease,transform .05s ease;
 }
 .qa-btn:hover{
     background:#1976d2;
     border-color:#1976d2;
     color:#fff;
+}
+/* Beat the Redmine theme's a:hover underline (higher specificity). */
+#qa-panel .qa-btn:hover,
+#qa-panel .qa-btn:focus,
+#qa-panel .qa-btn:active{
+    text-decoration:none;
 }
 .qa-btn:active{ transform:translateY(1px); }
 .qa-btn:focus-visible,
@@ -1136,6 +1158,7 @@
         qaInitialized = true;
         createPanel();
         initShortcuts();
+        consumeProjectHash();
         autoFillIfNeeded();
         rememberCurrentBoard();
     }

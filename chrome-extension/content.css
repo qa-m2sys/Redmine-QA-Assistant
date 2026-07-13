@@ -213,12 +213,19 @@
     cursor:pointer;
     font-size:13px;
     text-align:left;
+    text-decoration:none;
     transition:background .15s ease,border-color .15s ease,transform .05s ease;
 }
 .qa-btn:hover{
     background:#1976d2;
     border-color:#1976d2;
     color:#fff;
+}
+/* Beat the Redmine theme's a:hover underline (higher specificity). */
+#qa-panel .qa-btn:hover,
+#qa-panel .qa-btn:focus,
+#qa-panel .qa-btn:active{
+    text-decoration:none;
 }
 .qa-btn:active{ transform:translateY(1px); }
 .qa-btn:focus-visible,
