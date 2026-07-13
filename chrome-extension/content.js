@@ -68,6 +68,14 @@
 
     const MAX_AUTOFILL_TRIES = 40; // ~12s at 300ms
 
+    // Shown in the panel footer. Read from the extension manifest or the userscript
+    // metadata so it always matches the shipped version (no extra place to update).
+    const QA_VERSION = (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version)
+        ? GM_info.script.version
+        : ((typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getManifest)
+            ? chrome.runtime.getManifest().version
+            : "");
+
     // Returns the user's saved template, or the shipped default if none set.
     function getTemplate() {
         const saved = localStorage.getItem(STORAGE.template);
@@ -345,6 +353,7 @@
                         <button class="qa-btn qa-tmpl-btn" data-action="reset-template">↺ Reset</button>
                     </div>
                 </div>
+                <div class="qa-version">${QA_VERSION ? "v" + QA_VERSION : ""}</div>
             </div>
         `;
 
@@ -765,6 +774,11 @@
     //////////////////////////////////////////////////////
 
     function autoFillIfNeeded(tries = 0) {
+        // Only auto-fill on the NEW issue form. An existing issue's edit form also
+        // has #issue_description, so without this guard auto-fill would overwrite
+        // real issue content when editing.
+        if (!/\/issues\/new\/?$/.test(location.pathname)) return;
+
         const project = sessionStorage.getItem(STORAGE.project);
         if (!project) return;
 

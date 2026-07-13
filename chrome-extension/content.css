@@ -204,6 +204,7 @@
     align-items:center;
     justify-content:space-between;
     width:100%;
+    box-sizing:border-box;
     padding:9px 10px;
     margin-bottom:6px;
     border:1px solid #e4e7eb;
@@ -292,6 +293,14 @@
     font-size:12px;
 }
 
+.qa-version{
+    text-align:center;
+    color:#8a94a6;
+    font-size:10px;
+    letter-spacing:.4px;
+    margin-top:10px;
+}
+
 #qa-toast{
     position:fixed;
     bottom:24px;
@@ -342,6 +351,7 @@
     border-color:#e53935;
 }
 #qa-panel.qa-dark .qa-divider{ background:#3a4553; }
+#qa-panel.qa-dark .qa-version{ color:#9aa5b1; }
 #qa-panel.qa-dark .qa-template-input{
     background:#263340;
     border-color:#3a4553;

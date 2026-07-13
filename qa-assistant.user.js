@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      4.15
+// @version      4.18
 // @description  Switch project, auto-fill bug template, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @grant        none
@@ -71,6 +71,14 @@
     };
 
     const MAX_AUTOFILL_TRIES = 40; // ~12s at 300ms
+
+    // Shown in the panel footer. Read from the extension manifest or the userscript
+    // metadata so it always matches the shipped version (no extra place to update).
+    const QA_VERSION = (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version)
+        ? GM_info.script.version
+        : ((typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getManifest)
+            ? chrome.runtime.getManifest().version
+            : "");
 
     // Returns the user's saved template, or the shipped default if none set.
     function getTemplate() {
@@ -349,6 +357,7 @@
                         <button class="qa-btn qa-tmpl-btn" data-action="reset-template">↺ Reset</button>
                     </div>
                 </div>
+                <div class="qa-version">${QA_VERSION ? "v" + QA_VERSION : ""}</div>
             </div>
         `;
 
@@ -974,6 +983,7 @@
     align-items:center;
     justify-content:space-between;
     width:100%;
+    box-sizing:border-box;
     padding:9px 10px;
     margin-bottom:6px;
     border:1px solid #e4e7eb;
@@ -1062,6 +1072,14 @@
     font-size:12px;
 }
 
+.qa-version{
+    text-align:center;
+    color:#8a94a6;
+    font-size:10px;
+    letter-spacing:.4px;
+    margin-top:10px;
+}
+
 #qa-toast{
     position:fixed;
     bottom:24px;
@@ -1112,6 +1130,7 @@
     border-color:#e53935;
 }
 #qa-panel.qa-dark .qa-divider{ background:#3a4553; }
+#qa-panel.qa-dark .qa-version{ color:#9aa5b1; }
 #qa-panel.qa-dark .qa-template-input{
     background:#263340;
     border-color:#3a4553;
@@ -1129,6 +1148,11 @@
     //////////////////////////////////////////////////////
 
     function autoFillIfNeeded(tries = 0) {
+        // Only auto-fill on the NEW issue form. An existing issue's edit form also
+        // has #issue_description, so without this guard auto-fill would overwrite
+        // real issue content when editing.
+        if (!/\/issues\/new\/?$/.test(location.pathname)) return;
+
         const project = sessionStorage.getItem(STORAGE.project);
         if (!project) return;
 

@@ -5,6 +5,32 @@ For features and usage, see the [README](README.md).
 
 ---
 
+## Version 4.18 — current
+
+### Improvements
+- ✅ The panel now shows its **version number** in a small footer, read from the
+  extension manifest / userscript metadata so it always matches the build.
+
+---
+
+## Version 4.17
+
+### Bug fixes
+- ✅ Fixed auto-fill **overwriting an existing issue's description/fields when
+  editing**. Auto-fill now runs only on the New issue form (it previously ran on
+  any page that had a description field, including edit forms).
+
+---
+
+## Version 4.16
+
+### Bug fixes
+- ✅ Fixed the shortcut badges on the **Report Bug** / board buttons getting
+  clipped on the right. The link-based buttons now use `box-sizing:border-box`
+  (buttons had it by default, anchors did not), so they no longer overflow.
+
+---
+
 ## Version 4.15 — current
 
 ### Bug fixes
