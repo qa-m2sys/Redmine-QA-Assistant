@@ -57,9 +57,8 @@
 .qa-hbtn:hover{ background:rgba(255,255,255,.32); }
 .qa-collapse{ font-size:16px; }
 
-/* Dock button only makes sense once the panel is collapsed. */
-#qa-dock{ display:none; }
-#qa-panel.qa-collapsed #qa-dock{ display:flex; }
+/* Dock button is available in both expanded and collapsed states so the two
+   headers keep matching buttons and positions. */
 
 /* Docked (edge-pinned) pill. */
 .qa-dock-face{ display:none; }
@@ -130,16 +129,15 @@
     overflow:hidden;
 }
 
-/* Collapsed bar: same length (long side) & thickness in both orientations. */
+/* Collapsed horizontal bar mirrors the expanded panel: same width, and the header
+   keeps its default space-between layout so the title/buttons stay put. */
 #qa-panel.qa-collapsed:not(.qa-collapsed-vert):not(.qa-docked){
-    width:250px !important;
+    width:260px !important;
     height:44px;
 }
 #qa-panel.qa-collapsed .qa-header{
     height:100%;
     box-sizing:border-box;
-    justify-content:center;
-    gap:12px;
 }
 /* Keep the title on a single line in both collapsed orientations. */
 #qa-panel.qa-collapsed .qa-title{
@@ -155,6 +153,7 @@
     flex-direction:column;
     gap:8px;
     padding:10px 6px;
+    justify-content:center;
 }
 #qa-panel.qa-collapsed.qa-collapsed-vert .qa-title{
     writing-mode:vertical-rl;

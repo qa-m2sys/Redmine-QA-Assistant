@@ -138,7 +138,10 @@ powershell -ExecutionPolicy Bypass -File .\package-extension.ps1
 
 ## Notes
 
-- The panel and shortcuts are only active on `https://redmine.kernello.com/*`.
+- The full panel runs on `https://redmine.kernello.com/*`. It also runs on the
+  app under test, `https://dev.cloudapper.com/*`, as a **launcher** — the Report
+  Bug and Agile Board links open Redmine in a new tab (Fill / Copy / Clear only
+  act on the Redmine issue form).
 - Keep the extension and userscript in sync when making changes — they share the
   same logic and styles.
 

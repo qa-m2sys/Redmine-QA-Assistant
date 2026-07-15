@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "QA Assistant for Redmine",
-  "version": "4.18.0",
+  "version": "4.21.0",
   "description": "Switch project, auto-fill bug template, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools.",
   "icons": {
     "16": "icons/icon16.png",
@@ -18,7 +18,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://redmine.kernello.com/*"],
+      "matches": ["https://redmine.kernello.com/*", "https://dev.cloudapper.com/*"],
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"

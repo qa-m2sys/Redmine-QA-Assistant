@@ -5,7 +5,38 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 4.18 — current
+## Version 4.21 — current
+
+### Improvements
+- ✅ On **dev.cloudapper.com**, the **Actions** (Fill / Copy / Clear) and
+  **Description Template** sections are now hidden — they only act on the Redmine
+  issue form, so the panel there shows just Report Bug + Agile Boards. Both
+  sections remain on Redmine.
+
+---
+
+## Version 4.20
+
+### Improvements
+- ✅ The **collapsed (horizontal) bar** now matches the expanded panel exactly:
+  same 260px width and the same header layout, so the title and buttons stay in
+  place when collapsing/expanding.
+- ✅ The dock button is now shown in both the expanded and collapsed headers so
+  their buttons line up (it was previously only visible when collapsed).
+
+---
+
+## Version 4.19
+
+### New
+- ✅ The panel now also loads on the app under test, **dev.cloudapper.com**, as a
+  launcher. The **Report Bug** and **Agile Board** links now use absolute Redmine
+  URLs, so they open Redmine in a new tab from any site (auto-fill still runs in
+  the opened Redmine tab).
+
+---
+
+## Version 4.18
 
 ### Improvements
 - ✅ The panel now shows its **version number** in a small footer, read from the

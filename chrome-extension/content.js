@@ -11,6 +11,10 @@
     // CONFIG
     //////////////////////////////////////////////////////
 
+    // Redmine origin. The panel also runs on the app under test (dev.cloudapper.com)
+    // as a launcher, so Report Bug / board links must be absolute Redmine URLs.
+    const REDMINE = "https://redmine.kernello.com";
+
     // The ?issue[tracker_id]=1 query makes Redmine render the NEW issue form for
     // the Bug tracker server-side. This ensures Bug-specific fields (e.g.
     // "Affected version") are present on load, without any client-side AJAX
@@ -221,7 +225,7 @@
     function gotoProject(project) {
         if (!PROJECTS[project]) return;
         // The #qa=<project> marker tells the new tab which project to auto-fill.
-        window.open(PROJECTS[project].url + "#qa=" + project, "_blank", "noopener");
+        window.open(REDMINE + PROJECTS[project].url + "#qa=" + project, "_blank", "noopener");
     }
 
     // If the URL carries a #qa=<project> marker (from a Report Bug link/shortcut
@@ -234,16 +238,22 @@
         }
     }
 
+    // Ensure a board URL is absolute (Redmine origin) so links work from any site.
+    function toRedmineAbs(u) {
+        if (!u) return u;
+        return /^https?:\/\//i.test(u) ? u : REDMINE + u;
+    }
+
     // Build a board URL filtered to the project's current sprint (target version).
     function boardUrl(project) {
         const p = PROJECTS[project];
         if (!p || !p.board) return null;
-        if (!p.version) return p.board;
+        if (!p.version) return REDMINE + p.board;
         const q = "set_filter=1"
             + "&f%5B%5D=fixed_version_id"
             + "&op%5Bfixed_version_id%5D=%3D"
             + "&v%5Bfixed_version_id%5D%5B%5D=" + encodeURIComponent(p.version);
-        return p.board + "?" + q;
+        return REDMINE + p.board + "?" + q;
     }
 
     // Per-project map of the last agile board the user viewed.
@@ -264,7 +274,7 @@
         const key = PROJECT_ORDER.find(k => PROJECTS[k].board === `/projects/${slug}/agile/board`);
         if (!key) return;
         const boards = getLastBoards();
-        boards[key] = location.pathname + location.search;
+        boards[key] = location.origin + location.pathname + location.search;
         localStorage.setItem(STORAGE.lastBoard, JSON.stringify(boards));
     }
 
@@ -274,7 +284,7 @@
     function gotoBoard(project) {
         const p = PROJECTS[project];
         if (!p || !p.board) return;
-        const url = getLastBoards()[project] || boardUrl(project);
+        const url = toRedmineAbs(getLastBoards()[project] || boardUrl(project));
         window.open(url, "_blank", "noopener");
     }
 
@@ -288,10 +298,14 @@
         const panel = document.createElement("div");
         panel.id = "qa-panel";
 
+        // The Actions and Description Template sections only make sense on Redmine
+        // (they act on the issue form). On the app under test they are hidden.
+        const onRedmine = location.origin === REDMINE;
+
         const projectButtons = PROJECT_ORDER.map((key, i) => {
             const p = PROJECTS[key];
             return `<a class="qa-btn qa-project-btn" data-project="${key}"
-                        href="${p.url}#qa=${key}" target="_blank" rel="noopener">
+                        href="${REDMINE}${p.url}#qa=${key}" target="_blank" rel="noopener">
                         <span>${p.label}</span><kbd>${i + 1}</kbd>
                     </a>`;
         }).join("");
@@ -299,13 +313,42 @@
         const boardButtons = PROJECT_ORDER.map((key, i) => {
             const p = PROJECTS[key];
             const name = p.label.replace(/^\S+\s+/, ""); // label without the emoji
-            const href = getLastBoards()[key] || boardUrl(key);
+            const href = toRedmineAbs(getLastBoards()[key] || boardUrl(key));
             return `<a class="qa-btn qa-board-btn" data-board="${key}"
                         href="${href}" target="_blank" rel="noopener"
                         title="${name} agile board" aria-label="${name} agile board">
                         <span>${p.label}</span><kbd>⇧${i + 1}</kbd>
                     </a>`;
         }).join("");
+
+        const actionsHtml = onRedmine ? `
+                <div class="qa-divider"></div>
+                <div class="qa-section-label">Actions</div>
+                <button class="qa-btn qa-action" data-action="fill">
+                    <span>✍️ Fill Template</span><kbd>F</kbd>
+                </button>
+                <button class="qa-btn qa-action" data-action="copy">
+                    <span>📋 Copy Description</span><kbd>C</kbd>
+                </button>
+                <button class="qa-btn qa-action qa-danger" data-action="clear">
+                    <span>🧹 Clear Form</span><kbd>X</kbd>
+                </button>` : "";
+
+        const templateHtml = onRedmine ? `
+                <div class="qa-divider"></div>
+                <button class="qa-section-toggle" id="qa-tmpl-toggle" type="button" aria-expanded="false">
+                    <span>Description Template</span>
+                    <span class="qa-caret" id="qa-tmpl-caret">▸</span>
+                </button>
+                <div class="qa-tmpl-wrap" id="qa-tmpl-wrap" hidden>
+                    <textarea id="qa-template-input" class="qa-template-input"
+                              spellcheck="false"
+                              placeholder="Type your description template here…"></textarea>
+                    <div class="qa-template-actions">
+                        <button class="qa-btn qa-tmpl-btn" data-action="save-template">💾 Save</button>
+                        <button class="qa-btn qa-tmpl-btn" data-action="reset-template">↺ Reset</button>
+                    </div>
+                </div>` : "";
 
         panel.innerHTML = `
             <div class="qa-header" id="qa-header">
@@ -320,17 +363,7 @@
             <div class="qa-body" id="qa-body">
                 <div class="qa-section-label">Report Bug</div>
                 ${projectButtons}
-                <div class="qa-divider"></div>
-                <div class="qa-section-label">Actions</div>
-                <button class="qa-btn qa-action" data-action="fill">
-                    <span>✍️ Fill Template</span><kbd>F</kbd>
-                </button>
-                <button class="qa-btn qa-action" data-action="copy">
-                    <span>📋 Copy Description</span><kbd>C</kbd>
-                </button>
-                <button class="qa-btn qa-action qa-danger" data-action="clear">
-                    <span>🧹 Clear Form</span><kbd>X</kbd>
-                </button>
+                ${actionsHtml}
                 <div class="qa-divider"></div>
                 <button class="qa-section-toggle" id="qa-boards-toggle" type="button" aria-expanded="false">
                     <span>Agile Boards</span>
@@ -339,20 +372,7 @@
                 <div class="qa-tmpl-wrap" id="qa-boards-wrap" hidden>
                     ${boardButtons}
                 </div>
-                <div class="qa-divider"></div>
-                <button class="qa-section-toggle" id="qa-tmpl-toggle" type="button" aria-expanded="false">
-                    <span>Description Template</span>
-                    <span class="qa-caret" id="qa-tmpl-caret">▸</span>
-                </button>
-                <div class="qa-tmpl-wrap" id="qa-tmpl-wrap" hidden>
-                    <textarea id="qa-template-input" class="qa-template-input"
-                              spellcheck="false"
-                              placeholder="Type your description template here…"></textarea>
-                    <div class="qa-template-actions">
-                        <button class="qa-btn qa-tmpl-btn" data-action="save-template">💾 Save</button>
-                        <button class="qa-btn qa-tmpl-btn" data-action="reset-template">↺ Reset</button>
-                    </div>
-                </div>
+                ${templateHtml}
                 <div class="qa-version">${QA_VERSION ? "v" + QA_VERSION : ""}</div>
             </div>
         `;
@@ -367,33 +387,35 @@
         // mousedown covers left / middle / ctrl-click.
         panel.querySelectorAll(".qa-board-btn").forEach(a => {
             a.addEventListener("mousedown", () => {
-                a.href = getLastBoards()[a.dataset.board] || boardUrl(a.dataset.board);
+                a.href = toRedmineAbs(getLastBoards()[a.dataset.board] || boardUrl(a.dataset.board));
             });
         });
 
-        // Action buttons
-        panel.querySelector('[data-action="fill"]').addEventListener("click", () => {
-            fillIssue(sessionStorage.getItem(STORAGE.project));
-            toast("Template filled");
-        });
-        panel.querySelector('[data-action="copy"]').addEventListener("click", copyDescription);
-        panel.querySelector('[data-action="clear"]').addEventListener("click", clearForm);
+        // Action buttons + template editor only exist on Redmine.
+        if (onRedmine) {
+            panel.querySelector('[data-action="fill"]').addEventListener("click", () => {
+                fillIssue(sessionStorage.getItem(STORAGE.project));
+                toast("Template filled");
+            });
+            panel.querySelector('[data-action="copy"]').addEventListener("click", copyDescription);
+            panel.querySelector('[data-action="clear"]').addEventListener("click", clearForm);
 
-        // Template editor
-        const tmplInput = panel.querySelector("#qa-template-input");
-        tmplInput.value = getTemplate();
-        // Don't let clicks/keys inside the textarea trigger drag or shortcuts.
-        tmplInput.addEventListener("mousedown", (e) => e.stopPropagation());
-        tmplInput.addEventListener("keydown", (e) => e.stopPropagation());
-        panel.querySelector('[data-action="save-template"]').addEventListener("click", () => {
-            saveTemplate(tmplInput.value);
-            toast("Template saved");
-        });
-        panel.querySelector('[data-action="reset-template"]').addEventListener("click", () => {
-            localStorage.removeItem(STORAGE.template);
-            tmplInput.value = DEFAULT_DESCRIPTION;
-            toast("Template reset to default");
-        });
+            // Template editor
+            const tmplInput = panel.querySelector("#qa-template-input");
+            tmplInput.value = getTemplate();
+            // Don't let clicks/keys inside the textarea trigger drag or shortcuts.
+            tmplInput.addEventListener("mousedown", (e) => e.stopPropagation());
+            tmplInput.addEventListener("keydown", (e) => e.stopPropagation());
+            panel.querySelector('[data-action="save-template"]').addEventListener("click", () => {
+                saveTemplate(tmplInput.value);
+                toast("Template saved");
+            });
+            panel.querySelector('[data-action="reset-template"]').addEventListener("click", () => {
+                localStorage.removeItem(STORAGE.template);
+                tmplInput.value = DEFAULT_DESCRIPTION;
+                toast("Template reset to default");
+            });
+        }
 
         // Agile Boards collapse (hidden until user expands)
         const boardsToggle = panel.querySelector("#qa-boards-toggle");
@@ -410,20 +432,22 @@
         });
         setBoardsOpen(localStorage.getItem(STORAGE.boardsOpen) === "1");
 
-        // Description Template collapse (hidden until user expands)
-        const tmplToggle = panel.querySelector("#qa-tmpl-toggle");
-        const tmplWrap   = panel.querySelector("#qa-tmpl-wrap");
-        const tmplCaret  = panel.querySelector("#qa-tmpl-caret");
-        function setTemplateOpen(open) {
-            tmplWrap.hidden = !open;
-            tmplCaret.textContent = open ? "▾" : "▸";
-            tmplToggle.setAttribute("aria-expanded", open ? "true" : "false");
-            localStorage.setItem(STORAGE.tmplOpen, open ? "1" : "0");
+        // Description Template collapse only exists on Redmine.
+        if (onRedmine) {
+            const tmplToggle = panel.querySelector("#qa-tmpl-toggle");
+            const tmplWrap   = panel.querySelector("#qa-tmpl-wrap");
+            const tmplCaret  = panel.querySelector("#qa-tmpl-caret");
+            const setTemplateOpen = (open) => {
+                tmplWrap.hidden = !open;
+                tmplCaret.textContent = open ? "▾" : "▸";
+                tmplToggle.setAttribute("aria-expanded", open ? "true" : "false");
+                localStorage.setItem(STORAGE.tmplOpen, open ? "1" : "0");
+            };
+            tmplToggle.addEventListener("click", () => {
+                setTemplateOpen(tmplWrap.hidden);
+            });
+            setTemplateOpen(localStorage.getItem(STORAGE.tmplOpen) === "1");
         }
-        tmplToggle.addEventListener("click", () => {
-            setTemplateOpen(tmplWrap.hidden);
-        });
-        setTemplateOpen(localStorage.getItem(STORAGE.tmplOpen) === "1");
 
         // Collapse toggle
         document.getElementById("qa-collapse").addEventListener("click", (e) => {
