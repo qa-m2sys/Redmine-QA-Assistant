@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      5.45
+// @version      5.47
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -1677,16 +1677,10 @@ As a <role>, I want <goal> so that <benefit>.
     min-height:440px;
 }
 
-/* Redmine expanded panel: taller minimum so the whole flow — tracker grid,
-   project grid, agile boards row, description source (mode switch + AI or
-   template pane) and the version footer at the bottom — is visible on
-   first paint. Users can still resize taller via the corner/edge handles;
-   they just can't drop below this without collapsing/docking the panel.
+/* Redmine expanded panel: body scrolls so no minimum height is imposed.
+   Users can resize freely via the corner/edge handles.
    Capped by max-height:96vh on the base rule so it doesn't overflow small
    viewports. Overridden to 0 by .qa-collapsed / .qa-docked below. */
-#qa-panel:not(.qa-launcher){
-    min-height:680px;
-}
 
 /* Panel entry animation. Runs once on first mount. Skipped for users who
    prefer reduced motion so it doesn't feel like an unnecessary distraction. */
@@ -2180,10 +2174,11 @@ As a <role>, I want <goal> so that <benefit>.
     display:block;
 }
 /* Vertical (rotated) collapsed strip uses writing-mode:vertical-rl on
-   .qa-title, which would rotate the SVG oddly — hide the rocket only in
-   that state. The horizontal collapsed bar keeps the icon visible so the
-   pill still reads as "[🚀] QA Assistant". */
-#qa-panel.qa-collapsed.qa-collapsed-vert .qa-title-icon{ display:none; }
+   .qa-title — counteract the rotation on the icon so it stays upright
+   instead of being hidden entirely. */
+#qa-panel.qa-collapsed.qa-collapsed-vert .qa-title-icon{
+    writing-mode:horizontal-tb;
+}
 
 .qa-section-toggle{
     position:relative;

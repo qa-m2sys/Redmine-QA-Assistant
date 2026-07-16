@@ -5,7 +5,27 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 5.45 — current
+## Version 5.47 — current
+
+### Improvements
+- 🚀 The **header rocket icon** is now visible in the **vertical collapsed
+  strip** too (previously it was hidden because `writing-mode:vertical-rl`
+  rotated it). The icon now overrides `writing-mode:horizontal-tb` so it
+  stays upright while the text stacks vertically.
+
+---
+
+## Version 5.46
+
+### Improvements
+- ✅ Removed the **680px minimum height** on the expanded Redmine panel. Users
+  can now freely resize the panel smaller without limit (down to 180px, which
+  keeps the header visible). The panel body scrolls internally so content
+  stays accessible at any height.
+
+---
+
+## Version 5.45
 
 ### Bug fixes
 - ✅ Fixed the **Show/Hide key** eye icon being invisible. The SVG inside
