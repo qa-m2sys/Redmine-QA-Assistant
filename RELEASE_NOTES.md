@@ -5,6 +5,427 @@ For features and usage, see the [README](README.md).
 
 ---
 
+## Version 5.31 — current
+
+### Improvements
+- ✅ **AI review card announces itself.** After clicking Structure, the
+  "Review & edit before filling" section appears with a soft brand-tinted
+  halo pulse (`box-shadow` + slide-in over ~0.6s) so it's obvious a new
+  panel just arrived below the chat. The card also `scrollIntoView`s
+  (block: nearest, smooth) so it's never left off-screen. Re-running
+  Structure to refine a draft replays the pulse each time. Skipped when
+  `prefers-reduced-motion` is set.
+- ✅ **Clearer fallback reply.** When the AI response omits the chat
+  `reply` field but still produces a subject/description, the assistant
+  bubble now reads "Draft ready — review the subject and description
+  below, then click Fill." instead of a bare "Done." — so users know
+  exactly where to look and what to do next.
+
+---
+
+## Version 5.30
+
+### Fixes
+- ✅ **Launcher min-height.** On `dev.cloudapper.com` (and any non-Redmine
+  host) the expanded panel now enforces a taller 440px minimum height so
+  the trackers, projects, agile boards toggle **and** the `v5.xx` version
+  footer are all visible on first paint without scrolling. On Redmine the
+  original 180px minimum is unchanged — the panel there has more sections
+  and the body can scroll as before. Collapsed / docked states are
+  unaffected.
+
+---
+
+## Version 5.29
+
+### Improvements
+- ✅ **Per-tracker default templates.** The Description Source template is
+  no longer a single shared block. Each tracker — 🐞 Bug, ✨ Feature,
+  ✅ Task, 📖 User story, 🧪 Test case, 💡 Suggestion — now ships with its
+  own default template shaped for that kind of report (steps + expected
+  scenario for bugs, acceptance criteria for features / user stories,
+  checklist for tasks, preconditions + expected result for test cases,
+  current / suggested / benefit for suggestions).
+- ✅ **Template editor follows the tracker.** Picking a different tracker
+  card in the panel now repopulates the template textarea with that
+  tracker's saved (or shipped) template. Save / Reset act on the
+  currently selected tracker, so you can customise each one independently.
+- ✅ **Storage split.** User overrides are stored per tracker under
+  `qa-template-<tracker>` (e.g. `qa-template-bug`, `qa-template-feature`).
+  The legacy `qa-template` key is read once as a fallback for bug so any
+  existing customisation carries over transparently on first use.
+- ✅ **AI mode uses your overrides.** The AI system prompt already picks
+  its scaffold per tracker; it now also honours your saved override for
+  that tracker instead of a hardcoded string, so "Structure" produces
+  descriptions in exactly the format you customised.
+- ✅ **Fill Template respects the panel.** Clicking Fill Template without
+  a `#qa=` URL marker now uses the tracker currently highlighted in the
+  panel (previously it always defaulted to Bug).
+
+---
+
+## Version 5.28
+
+### Fixes
+- ↩️ **Reverted header subtitle.** The `v5.xx` line under the "🚀 QA
+  Assistant" title crowded the small header and duplicated info already
+  visible in the extension / userscript manager. The header is back to
+  a single `.qa-title` span and the version tag lives at the bottom of
+  the panel body again as `.qa-version` (its pre-5.26 home). The
+  `.qa-header-titles` / `.qa-subtitle` styles are removed. All other
+  v5.26 polish (soft focus rings, caret colour tween, panel entry
+  animation, radius tokens) is unchanged.
+
+---
+
+## Version 5.27
+
+### Fixes
+- ↩️ **Reverted AI chat empty state.** The centred "💭 Ask about this
+  ticket…" hint on `.qa-ai-chat:empty` felt like noise in the compact
+  panel — the empty state is back to `display:none` so the chat area
+  collapses cleanly until the first bubble arrives. All other v5.26
+  polish (soft focus rings, caret colour tween, panel entry animation,
+  radius tokens, header subtitle) is unchanged.
+
+---
+
+## Version 5.26
+
+### Improvements
+- ✅ **Soft focus rings.** Keyboard focus rings on buttons, header buttons,
+  section toggles, mode-switch buttons and tracker cards now render as a
+  soft 3px halo (`color-mix`ed brand at 30% alpha) instead of a flat 2px
+  outline — follows each element's border-radius, feels more like Vercel
+  / Linear. A transparent 2px outline is kept underneath so Windows High
+  Contrast Mode still shows a visible focus indicator.
+- ✅ **Animated caret colour.** Section chevrons already rotated 90° on
+  open; they now also tween to brand blue at the same time so the state
+  change reads instantly at a glance.
+- ✅ **AI chat empty state.** When the AI mode has no messages, the chat
+  area shows a centred muted hint ("💭 Ask about this ticket…") instead
+  of collapsing to nothing. Reappears after Reset Chat.
+- ✅ **Panel entry animation.** Panel now fades in (`opacity 0 → 1`) and
+  slides up 6px on first mount, over ~180ms. No more jumpy appearance on
+  page load / when the extension re-injects. Respects
+  `prefers-reduced-motion`.
+- ✅ **Border-radius harmony.** New tokens `--qa-r-sm` (6px), `--qa-r-md`
+  (8px), `--qa-r-lg` (12px). The panel shell, header capsule, header
+  buttons, main buttons, tracker cards and project cards now all trace
+  back to these variables, so a radius adjustment is a one-line change.
+- ✅ **Header subtitle.** The panel header now shows the running version
+  (e.g. `v5.26`) as a small subtitle under the "🚀 QA Assistant" title.
+  Version footer inside the body removed — no more duplication. Hidden
+  in vertical-collapsed mode to keep the sidebar chrome clean.
+
+---
+
+## Version 5.25
+
+### Fixes
+- ↩️ **Reverted sticky section headers.** In practice the pinned/blurred
+  section titles were noisier than helpful in a small panel that only
+  scrolls a little. `.qa-section-label` and `.qa-section-toggle` are back
+  to their pre-5.24 `position: relative` layout and scroll away with the
+  rest of the content. The `--qa-sticky-bg` token is removed. Toolbar
+  capsule, elevated grouped surfaces, and the AI typing dots from v5.24
+  are unchanged.
+
+---
+
+## Version 5.24
+
+### Improvements
+- ✅ **Toolbar-style header capsule.** The three header buttons (theme, dock,
+  collapse) are now grouped inside a single translucent capsule with 1 px
+  hairline dividers between them — same feel as Chrome's toolbar chip or
+  Arc's window controls. Dividers flip from vertical to horizontal when the
+  panel is docked to a side edge so the vertical bar looks right too.
+- ✅ **Sticky section headers.** When the panel body scrolls, section titles
+  (`Report an Issue`, `Actions`, `Agile Boards`, …) pin to the top with a
+  translucent blurred background so you always know which group of tools
+  you're looking at. Sits on top of the frosted panel's own backdrop-filter
+  for a stronger "pinned header" separation.
+- ✅ **Elevated grouped surfaces.** New `--qa-surface-elevated` token +
+  a soft 1 px border are applied to the Description Source wrap and the
+  AI "Review & edit" block, lifting them off the frosted body as distinct
+  tool cards instead of a loose stack of controls.
+- ✅ **Typing indicator.** The AI chat's static "Thinking…" bubble is
+  replaced by three dots pulsing in sequence (`.qa-typing` / `@keyframes
+  qa-dot-pulse`). Bubble keeps its accent-violet styling; the animation
+  strips itself once the real reply arrives.
+
+---
+
+## Version 5.23
+
+### Improvements
+- ✅ **Frosted-glass panel.** The whole card is now slightly translucent
+  (94% opaque surface) with `backdrop-filter: blur(24px) saturate(160%)` so
+  the Redmine content behind shows through as a soft mica-like tint. The
+  header keeps its brand gradient plus a 1px specular top highlight that
+  sells the "glass" like Big Sur / Windows 11 title bars. Body content
+  stays fully legible.
+- ✅ **Refined action buttons.** Hovering a `.qa-btn` no longer slams it to
+  solid brand blue. Instead a **3 px brand accent bar grows in from the
+  left** (0 → 3 px, 180ms cubic) and the background tints softly — Linear /
+  GitHub row style. Danger buttons get the same treatment in red; the
+  filled AI "Fill Subject & Description" button opts out (no bar over its
+  own solid fill).
+- ✅ **Micro-interactions.** Buttons now press with a subtle `scale(.985)`
+  instead of a `translateY(1px)` jump, gain a soft shadow on hover, and
+  drop it on active. Header icon buttons scale to `.92` on press.
+- ✅ **SVG icon system.** Header buttons (theme toggle, dock, collapse),
+  the section chevrons, and the API-key visibility toggle are now
+  stroke-based inline SVGs (`sun`, `moon`, `pin`, `plus`, `minus`,
+  `chevron-right`, `eye`, `eye-off`). Colours follow `currentColor` so they
+  match the theme and hover state automatically. Section chevrons rotate
+  90° on open via a `.qa-caret-open` class instead of a text swap — smooth
+  animation.
+- ✅ **Tighter tracker card grid.** The active tracker now keeps its 1 px
+  border and gets an inset 3 px brand stripe (`box-shadow: inset 3px 0 0`)
+  instead of swapping to a 2 px border with padding compensation. Zero
+  layout jitter when clicking between tracker cards.
+
+---
+
+## Version 5.22
+
+### Improvements
+- ✅ **Section-label accent bars.** Every section header (`REPORT TEMPLATE`,
+  `OTHER TEMPLATES`, `PROJECT`, `TRACKER`, …) now has a small
+  brand-coloured vertical bar (3 × 12 px, rounded) to its left. Applied
+  uniformly to both plain labels and collapsible toggles so all sections
+  share the same visual anchor and the panel scans as a clear list of
+  grouped tools instead of a stack of similar-looking rows.
+
+---
+
+## Version 5.21
+
+### Improvements
+- ✅ **Design tokens.** The entire panel palette (brand blue, accent violet,
+  danger red, surfaces, borders, dividers, scrollbar thumbs, shadows, the
+  header gradient) now lives as CSS custom properties on `#qa-panel`. Dark
+  mode is a single token-override block instead of ~30 duplicated rules
+  — changing the brand blue or tweaking dark-mode contrast is now a
+  one-line edit.
+- ✅ **Custom thin scrollbar** on the panel body and the AI chat window.
+  Rounded grey thumb on a transparent track, `scrollbar-gutter: stable` so
+  content doesn't jump when the scrollbar appears. Replaces the chunky
+  native Windows/GTK scroll gutter that clashed with the rounded panel.
+- ✅ **Sliding segmented indicator** for the **Template / AI** toggle. The
+  active pill now animates between the two buttons with a cubic-bezier
+  ease instead of hard-swapping colours — same look as iOS/macOS segmented
+  controls. Pure CSS: the JS handler just flips `data-active` on the
+  container.
+
+---
+
+## Version 5.20
+
+### Improvements
+- ✅ Agile board buttons now read "**Web Board**", "**Backend Board**",
+  "**iOS Board**", "**Android Board**" instead of just the project name,
+  so it's obvious at a glance that the row of buttons opens boards rather
+  than the projects themselves.
+- ✅ The **collapsed** horizontal bar now matches the expanded panel's new
+  minimum width — **300px** (was 260px) — so toggling collapse/expand no
+  longer shifts the panel's footprint sideways.
+
+---
+
+## Version 5.19
+
+### Fixes
+- ✅ Hovering over a **project card** no longer draws an underline under the
+  project name. Redmine's global `a:hover { text-decoration: underline }`
+  rule was leaking through the card's link. `text-decoration:none` is now
+  enforced on the card in all interaction states (`:hover`, `:focus`,
+  `:active`, `:visited`).
+
+---
+
+## Version 5.18
+
+### Improvements
+- ✅ Raised the expanded panel's minimum width from **270px** to **300px** so
+  the tracker and project card grids have more breathing room and the
+  **Step 2** row never feels cramped at the smallest size.
+
+---
+
+## Version 5.17
+
+### Improvements
+- ✅ Raised the expanded panel's minimum width from **260px** to **270px**
+  so the tracker cards and project cards have a touch more breathing room
+  at the smallest size.
+
+---
+
+## Version 5.16
+
+### Fixes
+- ✅ At the minimum panel width, the **Step 2 · choose a project** header and
+  the selected tracker chip next to it were wrapping onto two lines, which
+  broke the visual rhythm of the section. They now stay on a single line
+  — the step label truncates with an ellipsis if needed, the tracker chip
+  stays anchored to the right, and both use `justify-content: space-between`
+  for balanced spacing.
+
+---
+
+## Version 5.15
+
+### Improvements
+- ✅ **Choose a project** now renders as a two-column card grid that mirrors the
+  **Choose a tracker** section — emoji chip on the left, project name on the
+  right. This makes the two steps visually consistent and lets all four
+  projects fit on-screen without vertical scrolling.
+
+---
+
+## Version 5.14
+
+### Fixes
+- ✅ The **OpenAI API key** field no longer uses `type="password"`. Chrome and
+  password managers (1Password / LastPass / Bitwarden) attach autofill and
+  “save password?” prompts to any page containing a password input, which was
+  spilling into unrelated fields on the Agile board (the `Search by subject`
+  input). The key is now stored in a regular text input visually masked with
+  `-webkit-text-security`, and tagged with `autocomplete="off"`,
+  `data-lpignore`, `data-1p-ignore`, and `data-form-type="other"` so password
+  managers ignore it.
+
+### New
+- ✅ The key field gains a **Show / Hide** eye button so you can still verify
+  what you pasted before saving.
+
+---
+
+## Version 5.13
+
+### Improvements
+- ✅ The **Agile Boards** section is now shown **above the Actions** section in
+  the panel so navigation options stay closer to the report flow and the more
+  destructive Actions (Fill / Copy / Clear) sit at the bottom.
+
+---
+
+## Version 5.12
+
+### Improvements
+- ✅ The AI compose textarea placeholder now **matches the selected tracker**
+  instead of always saying “Describe the bug…”. Each tracker gets a tailored
+  hint (feature, task, user story, test case, suggestion).
+- ✅ The placeholder also updates live when the tracker dropdown on the Redmine
+  issue form is changed.
+
+---
+
+## Version 5.11
+
+### Fixes
+- ✅ The textareas in the **Description source** section (template editor, AI
+  compose input, AI review Subject/Description) now **wrap long lines** instead
+  of scrolling horizontally. Very long words or URLs also break so the content
+  always stays inside the panel width.
+
+---
+
+## Version 5.10
+
+### Fixes
+- ✅ The v5.9 typography change was invisible on machines where **Inter** wasn't
+  installed — the stack silently fell back to Segoe UI, which was already the
+  previous font. Inter is now loaded on demand from Google Fonts on init, so
+  the modern look renders everywhere. If a page's CSP blocks Google Fonts the
+  panel simply falls back to the OS UI font.
+- ✅ The panel now forces `font-family` on **every descendant**, including form
+  controls (`<button>`, `<input>`, `<select>`, `<textarea>`), which don't
+  inherit font-family by default. Redmine's host styles can no longer override
+  the panel typography.
+
+---
+
+## Version 5.9
+
+### Improvements
+- ✅ Refreshed the panel typography with a modern font stack
+  (**Inter → Segoe UI Variable → SF Pro → system-ui**), grayscale font
+  smoothing, tabular numerals, and subtle letter-spacing so the UI feels
+  cleaner and more consistent across Windows, macOS, and Linux.
+- ✅ Code blocks and the template editor now use a modern monospace stack
+  (**SF Mono / JetBrains Mono / Cascadia Code**) with a common CSS variable.
+
+---
+
+## Version 5.8
+
+### Improvements
+- ✅ The tracker-aware AI prompts are now more detailed — each tracker gets a
+  one-line definition of what it represents plus richer, section-by-section
+  guidance so the assistant fills every heading meaningfully.
+- ✅ **Feature** is now treated as a **new capability being introduced** (not a
+  “feature request”), and **Task** as a concrete unit of work to carry out, so
+  the wording and structure match how these trackers are actually used.
+
+---
+
+## Version 5.7
+
+### Improvements
+- ✅ The AI assistant now adapts to the **selected tracker**. Instead of always
+  writing a bug report, it produces the right kind of content for a **Feature**,
+  **Task**, **User story**, **Test case** or **Suggestion**, each with its own
+  title wording and description structure (e.g. acceptance criteria for user
+  stories, test steps for test cases).
+- ✅ On a Redmine issue form the assistant follows the tracker actually selected
+  in the form, so changing the tracker dropdown updates the AI output too.
+
+---
+
+## Version 5.6
+
+### Improvements
+- ✅ The description section is now **Step 3 · Description source**, placed right
+  below the project picker to follow the tracker → project → description flow.
+- ✅ The **Template / AI** switch is now a segmented toggle (two clear buttons)
+  instead of the on/off slider. All template and AI features are unchanged.
+
+---
+
+## Version 5.5
+
+### New
+- ✅ **Report under any tracker** — the *Report an Issue* section is now a
+  two-step picker: choose a **tracker** (Bug, Feature, Task, User story, Test
+  case, Suggestion), then a **project**. Redmine opens the New issue form for
+  that tracker and project, with the project's assignee auto-filled as before.
+  Your last-used tracker is remembered, and the `Alt`+`1..4` shortcuts open the
+  chosen project under the selected tracker.
+
+---
+
+## Version 5.4 — current
+
+### Improvements
+- ✅ The panel can now be resized from **any edge or corner** (not just the
+  bottom-right). Dragging the top/left sides moves the opposite edge so the
+  panel grows in place.
+
+---
+
+## Version 5.3 — current
+
+### New
+- ✅ **Resizable panel** — drag the bottom-right corner of the expanded panel to
+  adjust its width and height freely. Contents reflow to fit, the original size
+  is the minimum, and your chosen size is remembered across page loads.
+
+---
+
 ## Version 5.2 — current
 
 ### Fixes

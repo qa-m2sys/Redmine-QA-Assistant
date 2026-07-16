@@ -21,23 +21,30 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
 
 ## Features
 
-- **Report a bug in one click** — From the *Report Bug* section, open the New Bug
-  form for Web, Backend, iOS, or Android in a new tab. The correct Bug tracker
-  form is requested server-side, avoiding Redmine's stuck "Loading…" spinner.
+- **Report under any tracker** — From the *Report an Issue* section, first pick a
+  tracker (Bug, Feature, Task, User story, Test case, or Suggestion), then pick a
+  project (Web, Backend, iOS, or Android). Redmine opens the New issue form in a
+  new tab for that **tracker and project**, requested server-side to avoid the
+  stuck "Loading…" spinner. Your last-used tracker is remembered.
 - **Agile boards** — Open any project's agile board (Web, Backend, iOS, Android)
   in a new tab from the *Agile Boards* section, so your current page and panel
   stay put. Each button opens that project's **current sprint** board, and if
   you navigate to a different board it remembers and reopens your last-viewed one.
-- **Auto-fill after navigation** — After switching projects, the bug template,
-  tracker (Bug), status (New), priority (Normal), and the team assignee are
-  filled in automatically once the form loads.
+- **Auto-fill after navigation** — After opening a New issue, the template, the
+  selected tracker, status (New), priority (Normal), and the team assignee for
+  that project are filled in automatically once the form loads.
 - **Fill Template** — Manually (re)apply the template to the current issue form
   at any time.
-- **Editable description template** — Expand the *Description Template* section
-  to edit your own template. **Save** stores it locally; **Reset** restores the
-  shipped default. Your template is used for Fill, Copy and auto-fill.
-- **AI bug-report assistant** — Flip the *Description Template* section to **AI**
-  mode to chat with OpenAI and turn rough notes into a structured bug report.
+- **Editable description template** — Expand the *Step 3 · Description source*
+  section (placed right below the project picker) to edit your own template.
+  **Save** stores it locally; **Reset** restores the shipped default. Your
+  template is used for Fill, Copy and auto-fill.
+- **AI report assistant** — Use the segmented **Template / AI** toggle to
+  switch to **AI** mode and chat with OpenAI, turning rough notes into a
+  structured report. The assistant **adapts to the selected tracker** — Bug,
+  Feature, Task, User story, Test case or Suggestion — using the right title
+  wording and description structure for each (e.g. acceptance criteria for user
+  stories, test steps for test cases).
   It's a **multi-turn chat** (refine the result with follow-ups), returns an
   editable **Subject** and **Description** for review, and fills both into the
   Redmine form on demand. Includes a **model selector** (`gpt-4o` by default,
@@ -48,6 +55,9 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
 - **Toast notifications** — Small confirmations for every action.
 - **Floating, draggable panel** — Drag the panel anywhere on screen; its
   position is remembered.
+- **Resizable panel** — Drag any edge or corner of the panel to freely adjust its
+  width and height. The contents reflow to fit, the default size is the minimum,
+  and your chosen size persists across page loads.
 - **Collapsible panel** — Collapse it to a compact bar. When dragged to the
   **left or right screen edge** the collapsed bar rotates into a vertical strip
   that hugs the edge (and the title flips to stay readable on the left edge);
@@ -59,8 +69,8 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
 - **Dark mode** — toggle a dark theme from the 🌙 button in the panel header. Your
   choice is remembered and, by default, follows your operating system's
   light/dark preference.
-- **Persistent state** — Panel position, collapsed/docked state, dock position,
-  theme, and your custom template all persist across page loads.
+- **Persistent state** — Panel position, size, collapsed/docked state, dock
+  position, theme, and your custom template all persist across page loads.
 - **Scrollbar-aware placement** — The panel and pill stay fully on-screen and
   never slip underneath the browser's scrollbar.
 
@@ -73,10 +83,10 @@ layout (including the macOS Option key).
 
 | Shortcut | Action |
 |----------|--------|
-| `Alt` + `1` | Switch to **Web** new-bug form |
-| `Alt` + `2` | Switch to **Backend** new-bug form |
-| `Alt` + `3` | Switch to **iOS** new-bug form |
-| `Alt` + `4` | Switch to **Android** new-bug form |
+| `Alt` + `1` | Open the **Web** new-issue form (selected tracker) |
+| `Alt` + `2` | Open the **Backend** new-issue form (selected tracker) |
+| `Alt` + `3` | Open the **iOS** new-issue form (selected tracker) |
+| `Alt` + `4` | Open the **Android** new-issue form (selected tracker) |
 | `Alt` + `Shift` + `1` | Open the **Web** agile board |
 | `Alt` + `Shift` + `2` | Open the **Backend** agile board |
 | `Alt` + `Shift` + `3` | Open the **iOS** agile board |
@@ -147,8 +157,8 @@ powershell -ExecutionPolicy Bypass -File .\package-extension.ps1
 
 - The full panel runs on `https://redmine.kernello.com/*`. It also runs on the
   app under test, `https://dev.cloudapper.com/*`, as a **launcher** — the Report
-  Bug and Agile Board links open Redmine in a new tab (Fill / Copy / Clear only
-  act on the Redmine issue form).
+  an Issue and Agile Board links open Redmine in a new tab (Fill / Copy / Clear
+  only act on the Redmine issue form).
 - Keep the extension and userscript in sync when making changes — they share the
   same logic and styles.
 

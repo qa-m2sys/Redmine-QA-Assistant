@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      5.2
+// @version      5.31
 // @description  Switch project, auto-fill bug template, AI bug-report assistant, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -21,24 +21,44 @@
     // as a launcher, so Report Bug / board links must be absolute Redmine URLs.
     const REDMINE = "https://redmine.kernello.com";
 
-    // The ?issue[tracker_id]=1 query makes Redmine render the NEW issue form for
-    // the Bug tracker server-side. This ensures Bug-specific fields (e.g.
-    // "Affected version") are present on load, without any client-side AJAX
-    // reload (which caused a stuck "Loading..." spinner).
+    // Redmine renders the NEW issue form server-side for whichever tracker is in
+    // the ?issue[tracker_id]=<id> query, so tracker-specific fields (e.g. Bug's
+    // "Affected version") are present on load without any client-side AJAX reload
+    // (which caused a stuck "Loading..." spinner). "path" is the base new-issue
+    // URL; the selected tracker id is appended per navigation.
     const PROJECTS = {
-        web:     { label: "🌐 Web",     url: "/projects/web-app-version-2/issues/new?issue[tracker_id]=1", board: "/projects/web-app-version-2/agile/board", version: "2216", assignee: "CloudApper Web Team" },
-        backend: { label: "⚙️ Backend", url: "/projects/backend/issues/new?issue[tracker_id]=1",     board: "/projects/backend/agile/board",     version: "2215", assignee: "CloudApper Backend Team" },
-        ios:     { label: "🍎 iOS",     url: "/projects/ios-app/issues/new?issue[tracker_id]=1",     board: "/projects/ios-app/agile/board",     version: "2163", assignee: "CloudApper iOS Team" },
-        android: { label: "🤖 Android", url: "/projects/android-app/issues/new?issue[tracker_id]=1", board: "/projects/android-app/agile/board", version: "2206", assignee: "CloudApper Android Team" }
+        web:     { label: "🌐 Web",     path: "/projects/web-app-version-2/issues/new", board: "/projects/web-app-version-2/agile/board", version: "2216", assignee: "CloudApper Web Team" },
+        backend: { label: "⚙️ Backend", path: "/projects/backend/issues/new",           board: "/projects/backend/agile/board",           version: "2215", assignee: "CloudApper Backend Team" },
+        ios:     { label: "🍎 iOS",     path: "/projects/ios-app/issues/new",           board: "/projects/ios-app/agile/board",           version: "2163", assignee: "CloudApper iOS Team" },
+        android: { label: "🤖 Android", path: "/projects/android-app/issues/new",       board: "/projects/android-app/agile/board",       version: "2206", assignee: "CloudApper Android Team" }
     };
 
     // Order in which project buttons are rendered, and their keyboard shortcut digit.
     const PROJECT_ORDER = ["web", "backend", "ios", "android"];
 
-    // Shipped default. Users can override this with their own template from the
-    // panel; their version is saved in localStorage (STORAGE.template) and used
-    // for Fill / Copy / auto-fill. "Reset" restores this default.
-    const DEFAULT_DESCRIPTION = `
+    // Redmine trackers the user can report under. The numeric ids match this
+    // Redmine instance; TRACKER_ORDER controls the grid order.
+    const TRACKERS = {
+        bug:        { id: "1", name: "Bug",        emoji: "🐞" },
+        feature:    { id: "2", name: "Feature",    emoji: "✨" },
+        task:       { id: "5", name: "Task",       emoji: "✅" },
+        userstory:  { id: "6", name: "User story", emoji: "📖" },
+        testcase:   { id: "7", name: "Test case",  emoji: "🧪" },
+        suggestion: { id: "4", name: "Suggestion", emoji: "💡" }
+    };
+    const TRACKER_ORDER = ["bug", "feature", "task", "userstory", "testcase", "suggestion"];
+    const DEFAULT_TRACKER = "bug";
+
+    // The tracker currently chosen in the panel; used by the project buttons and
+    // the Alt+1..4 shortcuts to decide which tracker the new issue opens under.
+    let selectedTracker = DEFAULT_TRACKER;
+
+    // Shipped defaults, keyed by tracker. Users can override any of them from
+    // the panel; overrides are saved per tracker in localStorage under
+    // STORAGE.template + "-" + <trackerKey> and used for Fill / Copy /
+    // auto-fill. "Reset" restores the shipped default for the current tracker.
+    const DEFAULT_DESCRIPTIONS = {
+        bug: `
 
 *Description:*
 
@@ -64,11 +84,88 @@
 *App:*
 *Form/Menu:*
 
-`;
+`,
+        feature: `
+
+*Summary:*
+
+
+*Description:*
+
+
+*Acceptance Criteria:*
+#
+#
+#
+
+*Notes:*
+
+`,
+        task: `
+
+*Objective:*
+
+
+*Details:*
+
+
+*Checklist:*
+#
+#
+#
+
+`,
+        userstory: `
+
+*User Story:*
+As a <role>, I want <goal> so that <benefit>.
+
+*Acceptance Criteria:*
+#
+#
+#
+
+*Notes:*
+
+`,
+        testcase: `
+
+*Objective:*
+
+
+*Preconditions:*
+
+
+*Test Steps:*
+#
+#
+#
+
+*Expected Result:*
+
+`,
+        suggestion: `
+
+*Suggestion:*
+
+
+*Current Behavior:*
+
+
+*Suggested Improvement:*
+
+
+*Benefit:*
+
+`
+    };
 
     const STORAGE = {
         project:   "qa-project",
+        tracker:   "qa-tracker-id",
+        lastTracker:"qa-last-tracker",
         panelPos:  "qa-panel-pos",
+        panelSize: "qa-panel-size",
         collapsed: "qa-panel-collapsed",
         docked:    "qa-panel-docked",
         dockPos:   "qa-panel-dock-pos",
@@ -84,6 +181,24 @@
 
     const MAX_AUTOFILL_TRIES = 40; // ~12s at 300ms
 
+    // Inline-SVG icon set used for the header buttons (moon/sun/pin/minus/plus),
+    // the section chevrons, and the API-key visibility toggle. Kept as raw
+    // strings so the render code can drop them straight into innerHTML. All
+    // shapes are stroke-only and inherit currentColor via CSS (see .qa-hbtn svg
+    // / .qa-caret svg in the injected styles), so they follow theme/hover
+    // colours automatically.
+    const QA_ICONS = {
+        moon:            '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+        sun:             '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v1M12 20v1M3 12h1M20 12h1M5.6 5.6l.7.7M17.7 17.7l.7.7M5.6 18.4l.7-.7M17.7 6.3l.7-.7"/></svg>',
+        pin:             '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+        minus:           '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14"/></svg>',
+        plus:            '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+        "chevron-right": '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+        eye:             '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+        "eye-off":       '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.5 19.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19M1 1l22 22M9.88 9.88a3 3 0 1 0 4.24 4.24"/></svg>'
+    };
+    const svgIcon = (name) => QA_ICONS[name] || "";
+
     // Default OpenAI model for the AI bug-report assistant.
     const AI_DEFAULT_MODEL = "gpt-4o";
 
@@ -98,14 +213,40 @@
             ? chrome.runtime.getManifest().version
             : "");
 
-    // Returns the user's saved template, or the shipped default if none set.
-    function getTemplate() {
-        const saved = localStorage.getItem(STORAGE.template);
-        return (saved !== null && saved !== "") ? saved : DEFAULT_DESCRIPTION;
+    // Storage key for a given tracker's template override. Bug used to live
+    // under the plain STORAGE.template key before the per-tracker split;
+    // getTemplate() below still reads that as a fallback.
+    function templateStorageKey(trackerKey) {
+        return STORAGE.template + "-" + trackerKey;
     }
 
-    function saveTemplate(text) {
-        localStorage.setItem(STORAGE.template, text);
+    // Returns the user's saved template for the given tracker (defaults to the
+    // currently active tracker) or the shipped default if none is set.
+    function getTemplate(trackerKey) {
+        const key = trackerKey || currentTrackerKey();
+        let saved = localStorage.getItem(templateStorageKey(key));
+        // Back-compat: the bug template used to live under the plain
+        // "qa-template" key before the per-tracker split.
+        if ((saved === null || saved === "") && key === "bug") {
+            saved = localStorage.getItem(STORAGE.template);
+        }
+        return (saved !== null && saved !== "")
+            ? saved
+            : (DEFAULT_DESCRIPTIONS[key] || DEFAULT_DESCRIPTIONS.bug);
+    }
+
+    function saveTemplate(text, trackerKey) {
+        const key = trackerKey || currentTrackerKey();
+        localStorage.setItem(templateStorageKey(key), text);
+        // Legacy bug key is now redundant; drop it so the per-tracker one
+        // stays authoritative.
+        if (key === "bug") localStorage.removeItem(STORAGE.template);
+    }
+
+    function resetTemplate(trackerKey) {
+        const key = trackerKey || currentTrackerKey();
+        localStorage.removeItem(templateStorageKey(key));
+        if (key === "bug") localStorage.removeItem(STORAGE.template);
     }
 
     //////////////////////////////////////////////////////
@@ -118,20 +259,81 @@
         setKey: (k) => localStorage.setItem(STORAGE.aiKey, (k || "").trim())
     };
 
+    // Returns the tracker key that best matches what is being reported: prefer the
+    // tracker actually selected in the Redmine issue form, then the panel choice.
+    function currentTrackerKey() {
+        const sel = document.getElementById("issue_tracker_id");
+        if (sel && sel.value) {
+            const key = Object.keys(TRACKERS).find((k) => TRACKERS[k].id === String(sel.value));
+            if (key) return key;
+        }
+        return selectedTracker;
+    }
+
     // Instructions that make the model return a predictable JSON shape so we can
     // split its answer into a chat reply plus reviewable subject/description.
+    // Each tracker gets its own noun, description template and guidance so the AI
+    // produces the right kind of report (bug, feature, user story, task, ...).
+    const TRACKER_PROMPTS = {
+        bug: {
+            noun: "bug report",
+            role: "A Bug describes something that is broken or behaving incorrectly and needs to be fixed.",
+            placeholder: "Describe the bug in rough words\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("bug"),
+            guide: "Under the *Description:* heading, write a concise 1-2 sentence summary of the bug: what is broken, where it happens, and the impact. Fill *Steps:* with the numbered actions needed to reproduce it and *Expected Scenario:* with what should happen instead. Keep the remaining placeholders for details the notes do not cover. Never leave *Description:* empty when the notes describe a problem."
+        },
+        feature: {
+            noun: "feature",
+            role: "A Feature describes a NEW capability that is being introduced or implemented \u2014 it is not a bug, a fix, or merely a request.",
+            placeholder: "Describe the new feature you're introducing\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("feature"),
+            guide: "Describe the new feature being added. Under *Summary:* give a one-line statement of what the feature is. Under *Description:* explain what it does, who it is for, and the value it delivers in 2-4 sentences. Under *Acceptance Criteria:* list concrete, testable conditions that must be met for the feature to be considered complete. Use *Notes:* for dependencies, edge cases, or open questions."
+        },
+        task: {
+            noun: "task",
+            role: "A Task is a concrete unit of work to be carried out (for example implementation, configuration, or investigation) \u2014 it is not a bug report.",
+            placeholder: "Describe the work to be done\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("task"),
+            guide: "Under *Objective:* state the goal of the task in 1-2 sentences. Under *Details:* add the context, scope, and any constraints or dependencies. Break the work into clear, independently verifiable steps under *Checklist:*."
+        },
+        userstory: {
+            noun: "user story",
+            role: "A User story captures a requirement from an end user's perspective and the value it provides.",
+            placeholder: "Describe the user need \u2014 role, goal, benefit\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("userstory"),
+            guide: "Fill *User Story:* using the \"As a <role>, I want <goal> so that <benefit>\" form, replacing the placeholders with the real role, goal, and benefit from the notes. Under *Acceptance Criteria:* list concrete, testable conditions that define when the story is done. Use *Notes:* for assumptions or related details."
+        },
+        testcase: {
+            noun: "test case",
+            role: "A Test case describes how to verify a specific behaviour, including the steps and the expected result.",
+            placeholder: "Describe what to test and the expected result\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("testcase"),
+            guide: "Under *Objective:* summarise what is being verified in one sentence. Under *Preconditions:* list the state or data required before testing. Provide clear, ordered actions under *Test Steps:* and describe the precise, observable outcome under *Expected Result:*."
+        },
+        suggestion: {
+            noun: "suggestion",
+            role: "A Suggestion proposes an improvement or idea; it is optional and is not a defect.",
+            placeholder: "Describe your suggestion or improvement idea\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("suggestion"),
+            guide: "Under *Suggestion:* summarise the idea in 1-2 sentences. Under *Current Behavior:* describe how things work today, and under *Suggested Improvement:* what should change. Explain the value it adds under *Benefit:*."
+        }
+    };
+
     function aiSystemPrompt() {
+        const t = TRACKER_PROMPTS[currentTrackerKey()] || TRACKER_PROMPTS[DEFAULT_TRACKER];
         return [
-            "You are a QA assistant that turns a tester's rough notes into a well-structured Redmine bug report.",
+            "You are a QA assistant that turns rough notes into a well-structured Redmine " + t.noun + ".",
+            t.role,
             "Always respond with a JSON object containing exactly these keys:",
-            '- "reply": a short, friendly message to the tester (max 2 sentences) about what you produced or what you still need.',
-            '- "subject": a concise, specific bug title (<= 120 chars). Use an empty string if there is not enough information yet.',
-            '- "description": the full bug description formatted using EXACTLY this template structure, filling in what the notes provide and keeping the placeholders for anything missing:',
+            '- "reply": a short, friendly message to the reporter (max 2 sentences) about what you produced or what you still need.',
+            '- "subject": a concise, specific ' + t.noun + ' title (<= 120 chars). Use an empty string if there is not enough information yet.',
+            '- "description": the full ' + t.noun + ' formatted using EXACTLY this template structure, filling in what the notes provide and keeping the placeholders for anything missing:',
             "-----",
-            getTemplate(),
+            t.template(),
             "-----",
-            "Under the *Description:* heading, write a concise 1-2 sentence summary of the bug (what is broken and where). Never leave *Description:* empty when the notes describe a problem.",
-            "Only use facts the tester provided. Do not invent steps, credentials, or versions. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and give a best-effort subject/description."
+            t.guide,
+            "Keep the exact *Heading:* labels and the blank-line spacing from the template, and write in clear, professional English with each section kept focused.",
+            "Only use facts the reporter provided. Do not invent steps, credentials, versions, or acceptance criteria that the notes do not imply. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and give a best-effort subject/description."
         ].join("\n");
     }
 
@@ -204,7 +406,7 @@
         panel.classList.toggle("qa-dark", dark);
         const btn = document.getElementById("qa-theme");
         if (btn) {
-            btn.textContent = dark ? "☀️" : "🌙";
+            btn.innerHTML = svgIcon(dark ? "sun" : "moon");
             btn.title = dark ? "Switch to light mode" : "Switch to dark mode";
         }
     }
@@ -271,7 +473,12 @@
     }
 
     function fillIssue(project) {
-        setSelectSilently("issue_tracker_id", "1"); // Bug   (no AJAX reload)
+        // Prefer the tracker id carried by the hash marker (session storage);
+        // otherwise fall back to whichever tracker card is active in the panel
+        // so manual Fill Template respects the user's current selection.
+        const defaultId = (TRACKERS[selectedTracker] || TRACKERS[DEFAULT_TRACKER]).id;
+        const trackerId = sessionStorage.getItem(STORAGE.tracker) || defaultId;
+        setSelectSilently("issue_tracker_id", trackerId); // selected tracker (no AJAX reload)
         setSelectSilently("issue_status_id", "1");  // New   (no AJAX reload)
 
         setValue("issue_priority_id", "2");         // Normal (no reload handler)
@@ -339,18 +546,30 @@
     // Navigation
     //////////////////////////////////////////////////////
 
-    function gotoProject(project) {
-        if (!PROJECTS[project]) return;
-        // The #qa=<project> marker tells the new tab which project to auto-fill.
-        window.open(REDMINE + PROJECTS[project].url + "#qa=" + project, "_blank", "noopener");
+    // Build the new-issue URL for a project under a given tracker id. The
+    // #qa=<project>&t=<id> marker tells the opened tab which project to auto-fill
+    // (assignee) and which tracker to keep selected.
+    function newIssueUrl(project, trackerId) {
+        const p = PROJECTS[project];
+        if (!p) return "#";
+        return REDMINE + p.path + "?issue[tracker_id]=" + trackerId + "#qa=" + project + "&t=" + trackerId;
     }
 
-    // If the URL carries a #qa=<project> marker (from a Report Bug link/shortcut
-    // opened in a new tab), record it so auto-fill and manual Fill know the project.
+    function gotoProject(project) {
+        if (!PROJECTS[project]) return;
+        const t = TRACKERS[selectedTracker] || TRACKERS[DEFAULT_TRACKER];
+        window.open(newIssueUrl(project, t.id), "_blank", "noopener");
+    }
+
+    // If the URL carries a #qa=<project> marker (from a Report link/shortcut
+    // opened in a new tab), record it so auto-fill and manual Fill know the
+    // project and tracker.
     function consumeProjectHash() {
         const m = location.hash.match(/(?:^#|[#&])qa=([a-z]+)/i);
         if (m && PROJECTS[m[1]]) {
             sessionStorage.setItem(STORAGE.project, m[1]);
+            const tm = location.hash.match(/[#&]t=(\d+)/);
+            if (tm) sessionStorage.setItem(STORAGE.tracker, tm[1]);
             history.replaceState(null, "", location.pathname + location.search);
         }
     }
@@ -419,12 +638,30 @@
         // (they act on the issue form). On the app under test they are hidden.
         const onRedmine = location.origin === REDMINE;
 
-        const projectButtons = PROJECT_ORDER.map((key, i) => {
+        // Launcher hosts (dev.cloudapper.com etc.) show a shorter body — no
+        // Actions and no Description Source sections. Tag the panel so CSS can
+        // raise the expanded min-height enough to keep the version footer
+        // visible without scrolling.
+        if (!onRedmine) panel.classList.add("qa-launcher");
+
+        const projectButtons = PROJECT_ORDER.map((key) => {
             const p = PROJECTS[key];
-            return `<a class="qa-btn qa-project-btn" data-project="${key}"
-                        href="${REDMINE}${p.url}#qa=${key}" target="_blank" rel="noopener">
-                        <span>${p.label}</span><kbd>${i + 1}</kbd>
+            // Labels look like "🌐 Web" — split emoji from name so it renders
+            // like a tracker card (emoji chip + name).
+            const firstSpace = p.label.indexOf(" ");
+            const emoji = firstSpace > 0 ? p.label.slice(0, firstSpace) : "";
+            const name  = firstSpace > 0 ? p.label.slice(firstSpace + 1) : p.label;
+            return `<a class="qa-project-card qa-project-btn" data-project="${key}"
+                        href="${newIssueUrl(key, TRACKERS[DEFAULT_TRACKER].id)}" target="_blank" rel="noopener">
+                        <span class="qa-project-emoji">${emoji}</span><span>${name}</span>
                     </a>`;
+        }).join("");
+
+        const trackerCards = TRACKER_ORDER.map((key) => {
+            const t = TRACKERS[key];
+            return `<button class="qa-tracker-card" data-tracker="${key}" type="button">
+                        <span class="qa-tracker-emoji">${t.emoji}</span><span>${t.name}</span>
+                    </button>`;
         }).join("");
 
         const boardButtons = PROJECT_ORDER.map((key, i) => {
@@ -434,7 +671,7 @@
             return `<a class="qa-btn qa-board-btn" data-board="${key}"
                         href="${href}" target="_blank" rel="noopener"
                         title="${name} agile board" aria-label="${name} agile board">
-                        <span>${p.label}</span><kbd>⇧${i + 1}</kbd>
+                        <span>${p.label} Board</span><kbd>⇧${i + 1}</kbd>
                     </a>`;
         }).join("");
 
@@ -454,15 +691,14 @@
         const templateHtml = onRedmine ? `
                 <div class="qa-divider"></div>
                 <button class="qa-section-toggle" id="qa-tmpl-toggle" type="button" aria-expanded="false">
-                    <span>Description Template</span>
-                    <span class="qa-caret" id="qa-tmpl-caret">▸</span>
+                    <span>Step 3 · Description source</span>
+                    <span class="qa-caret" id="qa-tmpl-caret">${svgIcon("chevron-right")}</span>
                 </button>
                 <div class="qa-tmpl-wrap" id="qa-tmpl-wrap" hidden>
-                    <label class="qa-mode-switch" title="Switch between template editing and the AI assistant">
-                        <span class="qa-mode-name" data-mode="template">📝 Template</span>
-                        <span class="qa-switch"><input type="checkbox" id="qa-ai-toggle"><span class="qa-switch-track"></span></span>
-                        <span class="qa-mode-name" data-mode="ai">🤖 AI</span>
-                    </label>
+                    <div class="qa-mode-switch" id="qa-mode-switch" role="tablist" aria-label="Description source">
+                        <button type="button" class="qa-mode-btn active" data-mode="template">📝 Template</button>
+                        <button type="button" class="qa-mode-btn" data-mode="ai">🤖 AI</button>
+                    </div>
 
                     <div id="qa-tmpl-mode">
                         <textarea id="qa-template-input" class="qa-template-input"
@@ -481,8 +717,12 @@
                                 <button class="qa-btn qa-tmpl-btn" data-action="ai-change-key">Change</button>
                             </div>
                             <div class="qa-ai-key-edit" id="qa-ai-key-edit">
-                                <input type="password" id="qa-ai-key-input" class="qa-ai-field"
-                                       placeholder="OpenAI API key (sk-…)" autocomplete="off" spellcheck="false">
+                                <input type="text" id="qa-ai-key-input" class="qa-ai-field qa-secret"
+                                       placeholder="OpenAI API key (sk-…)"
+                                       autocomplete="off" spellcheck="false"
+                                       data-lpignore="true" data-1p-ignore data-form-type="other">
+                                <button class="qa-btn qa-tmpl-btn qa-icon-btn" type="button"
+                                        data-action="ai-toggle-key" title="Show / hide key">${svgIcon("eye")}</button>
                                 <button class="qa-btn qa-tmpl-btn" data-action="ai-save-key">🔑 Save</button>
                             </div>
                         </div>
@@ -513,33 +753,84 @@
             <div class="qa-header" id="qa-header">
                 <span class="qa-title">🚀 QA Assistant</span>
                 <div class="qa-header-btns">
-                    <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">🌙</button>
-                    <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">📌</button>
-                    <button class="qa-hbtn qa-collapse" id="qa-collapse" title="Collapse / Expand">–</button>
+                    <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">${svgIcon("moon")}</button>
+                    <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">${svgIcon("pin")}</button>
+                    <button class="qa-hbtn qa-collapse" id="qa-collapse" title="Collapse / Expand">${svgIcon("minus")}</button>
                 </div>
             </div>
             <div class="qa-dock-face" id="qa-dock-face" title="Click to restore QA Assistant">QA</div>
             <div class="qa-body" id="qa-body">
-                <div class="qa-section-label">Report Bug</div>
-                ${projectButtons}
-                ${actionsHtml}
+                <div class="qa-section-label">Report an Issue</div>
+                <div class="qa-report-substep">Step 1 · choose a tracker</div>
+                <div class="qa-tracker-grid" id="qa-tracker-grid">${trackerCards}</div>
+                <div class="qa-report-substep qa-project-step" id="qa-project-step" hidden>
+                    <span>Step 2 · choose a project</span>
+                    <span class="qa-report-for" id="qa-report-for"></span>
+                </div>
+                <div class="qa-project-grid" id="qa-project-list" hidden>${projectButtons}</div>
+                ${templateHtml}
                 <div class="qa-divider"></div>
                 <button class="qa-section-toggle" id="qa-boards-toggle" type="button" aria-expanded="false">
                     <span>Agile Boards</span>
-                    <span class="qa-caret" id="qa-boards-caret">▸</span>
+                    <span class="qa-caret" id="qa-boards-caret">${svgIcon("chevron-right")}</span>
                 </button>
                 <div class="qa-tmpl-wrap" id="qa-boards-wrap" hidden>
                     ${boardButtons}
                 </div>
-                ${templateHtml}
+                ${actionsHtml}
                 <div class="qa-version">${QA_VERSION ? "v" + QA_VERSION : ""}</div>
             </div>
         `;
 
         document.body.appendChild(panel);
 
-        // Report Bug links are plain <a target="_blank"> elements; the new tab
-        // reads the #qa=<project> marker in the URL to run auto-fill.
+        // Report links are plain <a target="_blank"> elements; the new tab reads
+        // the #qa=<project>&t=<tracker> marker in the URL to run auto-fill.
+
+        // ---- Report: pick a tracker, then reveal the project picker ----
+        const trackerGrid  = panel.querySelector("#qa-tracker-grid");
+        const projectStep  = panel.querySelector("#qa-project-step");
+        const projectList  = panel.querySelector("#qa-project-list");
+        const reportFor    = panel.querySelector("#qa-report-for");
+        const projectLinks = panel.querySelectorAll(".qa-project-btn");
+
+        // Refresh hook for the template editor — gets wired up further down in
+        // the onRedmine branch once #qa-template-input exists. applyTracker()
+        // calls it so switching trackers repopulates the textarea with the new
+        // tracker's saved / default template.
+        let refreshTemplateEditor = null;
+
+        // Keeps the AI compose textarea's placeholder aligned with the active
+        // tracker so the prompt hint matches the kind of report being written.
+        function refreshAiPlaceholder() {
+            const aiInputEl = panel.querySelector("#qa-ai-input");
+            if (!aiInputEl) return;
+            const t = TRACKER_PROMPTS[currentTrackerKey()] || TRACKER_PROMPTS[DEFAULT_TRACKER];
+            aiInputEl.placeholder = t.placeholder;
+        }
+
+        function applyTracker(key) {
+            const t = TRACKERS[key];
+            if (!t) return;
+            selectedTracker = key;
+            localStorage.setItem(STORAGE.lastTracker, key);
+            trackerGrid.querySelectorAll(".qa-tracker-card").forEach(c =>
+                c.classList.toggle("active", c.dataset.tracker === key));
+            reportFor.textContent = t.emoji + " " + t.name;
+            projectStep.hidden = false;
+            projectList.hidden = false;
+            projectLinks.forEach(a => { a.href = newIssueUrl(a.dataset.project, t.id); });
+            refreshAiPlaceholder();
+            if (refreshTemplateEditor) refreshTemplateEditor();
+        }
+        trackerGrid.querySelectorAll(".qa-tracker-card").forEach(card => {
+            card.addEventListener("click", (e) => {
+                e.stopPropagation();
+                applyTracker(card.dataset.tracker);
+            });
+        });
+        // Restore the last-used tracker (default Bug) so the picker is ready.
+        applyTracker(localStorage.getItem(STORAGE.lastTracker) || DEFAULT_TRACKER);
 
         // Agile board links: refresh the href just before navigation so it points
         // at the last-viewed board (or the current sprint) for that project.
@@ -561,22 +852,29 @@
 
             // Template editor
             const tmplInput = panel.querySelector("#qa-template-input");
-            tmplInput.value = getTemplate();
+            tmplInput.value = getTemplate(selectedTracker);
+            // Repopulate the editor whenever the selected tracker changes so the
+            // textarea always shows that tracker's saved (or default) template.
+            // Uses selectedTracker (the tracker card in the panel) rather than
+            // currentTrackerKey() so the editor stays in sync with the user's
+            // panel choice even if the Redmine form's tracker dropdown differs.
+            refreshTemplateEditor = () => { tmplInput.value = getTemplate(selectedTracker); };
             // Don't let clicks/keys inside the textarea trigger drag or shortcuts.
             tmplInput.addEventListener("mousedown", (e) => e.stopPropagation());
             tmplInput.addEventListener("keydown", (e) => e.stopPropagation());
             panel.querySelector('[data-action="save-template"]').addEventListener("click", () => {
-                saveTemplate(tmplInput.value);
+                saveTemplate(tmplInput.value, selectedTracker);
                 toast("Template saved");
             });
             panel.querySelector('[data-action="reset-template"]').addEventListener("click", () => {
-                localStorage.removeItem(STORAGE.template);
-                tmplInput.value = DEFAULT_DESCRIPTION;
+                resetTemplate(selectedTracker);
+                tmplInput.value = getTemplate(selectedTracker);
                 toast("Template reset to default");
             });
 
             // ---- AI assistant mode ----
-            const aiToggle   = panel.querySelector("#qa-ai-toggle");
+            const modeSwitchEl = panel.querySelector("#qa-mode-switch");
+            const modeBtns   = panel.querySelectorAll(".qa-mode-btn");
             const tmplModeEl = panel.querySelector("#qa-tmpl-mode");
             const aiModeEl   = panel.querySelector("#qa-ai-mode");
             const aiKeyRow   = panel.querySelector("#qa-ai-key");
@@ -589,6 +887,14 @@
             const aiReview   = panel.querySelector("#qa-ai-review");
             const aiSubject  = panel.querySelector("#qa-ai-subject");
             const aiDesc     = panel.querySelector("#qa-ai-desc");
+
+            // Set the initial placeholder now that #qa-ai-input exists, and keep
+            // it in sync when the Redmine form's tracker dropdown changes.
+            refreshAiPlaceholder();
+            const issueTrackerSel = document.getElementById("issue_tracker_id");
+            if (issueTrackerSel) {
+                issueTrackerSel.addEventListener("change", refreshAiPlaceholder);
+            }
 
             // Keep typing inside AI fields from triggering drag / shortcuts.
             [aiKeyInput, aiInput, aiSubject, aiDesc].forEach((el) => {
@@ -614,16 +920,34 @@
                 return b;
             }
 
+            // Loading placeholder while an AI response is in flight. Three dots
+            // pulse in sequence (see .qa-typing / @keyframes qa-dot-pulse in
+            // the injected styles) — the .qa-typing class is stripped when the
+            // reply arrives and normal textContent takes over.
+            function addTypingBubble() {
+                const b = document.createElement("div");
+                b.className = "qa-bubble qa-bubble-ai qa-typing";
+                b.innerHTML = '<span class="qa-dot"></span><span class="qa-dot"></span><span class="qa-dot"></span>';
+                aiChatEl.appendChild(b);
+                aiChatEl.scrollTop = aiChatEl.scrollHeight;
+                return b;
+            }
+
             function setAiMode(on) {
                 aiModeEl.hidden = !on;
                 tmplModeEl.hidden = on;
-                aiToggle.checked = on;
-                panel.querySelector(".qa-mode-switch").classList.toggle("qa-ai-on", on);
+                modeBtns.forEach((b) => b.classList.toggle("active", (b.dataset.mode === "ai") === on));
+                // Drive the sliding pill in .qa-mode-switch via a data attribute so the
+                // animation is pure CSS (see .qa-mode-switch::before in the injected styles).
+                if (modeSwitchEl) modeSwitchEl.dataset.active = on ? "ai" : "template";
                 localStorage.setItem(STORAGE.aiMode, on ? "1" : "0");
                 if (on) refreshKeyRow();
             }
 
-            aiToggle.addEventListener("change", () => setAiMode(aiToggle.checked));
+            modeBtns.forEach((btn) => btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                setAiMode(btn.dataset.mode === "ai");
+            }));
 
             // Model selector (persisted; falls back to the default).
             aiModelSel.value = AI.model();
@@ -651,6 +975,17 @@
                 aiKeyInput.focus();
             });
 
+            // Toggle masked / plain rendering of the key input. We use
+            // -webkit-text-security on a regular text input (see .qa-secret)
+            // instead of type="password" so browsers and password managers
+            // don't attach autofill to other inputs on the page (e.g. the
+            // Agile board's search field).
+            panel.querySelector('[data-action="ai-toggle-key"]').addEventListener("click", (e) => {
+                e.stopPropagation();
+                aiKeyInput.classList.toggle("qa-secret");
+                e.currentTarget.innerHTML = svgIcon(aiKeyInput.classList.contains("qa-secret") ? "eye" : "eye-off");
+            });
+
             async function sendToAi() {
                 const text = aiInput.value.trim();
                 if (!text) return;
@@ -660,19 +995,35 @@
                 aiHistory.push({ role: "user", content: text });
                 aiInput.value = "";
 
-                const thinking = addBubble("ai", "Thinking…");
+                const thinking = addTypingBubble();
                 const sendBtn = panel.querySelector('[data-action="ai-send"]');
                 sendBtn.disabled = true;
                 try {
                     const res = await aiChat(aiHistory);
                     aiHistory.push({ role: "assistant", content: res.raw || JSON.stringify(res) });
-                    thinking.textContent = res.reply || "Done.";
-                    if (res.subject || res.description) {
+                    thinking.classList.remove("qa-typing");
+                    const hasDraft = !!(res.subject || res.description);
+                    // When the model omitted a chat reply, tell the user WHERE
+                    // to look next instead of a bare "Done." — the review card
+                    // is often below the fold and easy to miss otherwise.
+                    thinking.textContent = res.reply || (hasDraft
+                        ? "Draft ready \u2014 review the subject and description below, then click Fill."
+                        : "Done.");
+                    if (hasDraft) {
                         aiSubject.value = res.subject || aiSubject.value;
                         aiDesc.value = res.description || aiDesc.value;
                         aiReview.hidden = false;
+                        // Pulse the review card + scroll it into view so it's
+                        // obvious that a new panel just appeared. Removing the
+                        // class then forcing a reflow (offsetWidth read)
+                        // restarts the animation on every fresh draft.
+                        aiReview.classList.remove("qa-ai-review-reveal");
+                        void aiReview.offsetWidth;
+                        aiReview.classList.add("qa-ai-review-reveal");
+                        aiReview.scrollIntoView({ behavior: "smooth", block: "nearest" });
                     }
                 } catch (err) {
+                    thinking.classList.remove("qa-typing");
                     thinking.classList.add("qa-bubble-error");
                     thinking.textContent = "⚠️ " + err.message;
                 } finally {
@@ -710,7 +1061,7 @@
         const boardsCaret  = panel.querySelector("#qa-boards-caret");
         function setBoardsOpen(open) {
             boardsWrap.hidden = !open;
-            boardsCaret.textContent = open ? "▾" : "▸";
+            boardsCaret.classList.toggle("qa-caret-open", open);
             boardsToggle.setAttribute("aria-expanded", open ? "true" : "false");
             localStorage.setItem(STORAGE.boardsOpen, open ? "1" : "0");
         }
@@ -726,7 +1077,7 @@
             const tmplCaret  = panel.querySelector("#qa-tmpl-caret");
             const setTemplateOpen = (open) => {
                 tmplWrap.hidden = !open;
-                tmplCaret.textContent = open ? "▾" : "▸";
+                tmplCaret.classList.toggle("qa-caret-open", open);
                 tmplToggle.setAttribute("aria-expanded", open ? "true" : "false");
                 localStorage.setItem(STORAGE.tmplOpen, open ? "1" : "0");
             };
@@ -758,6 +1109,7 @@
         restorePanelState(panel);
         makeDraggable(panel, document.getElementById("qa-header"));
         makeDockDraggable(panel, document.getElementById("qa-dock-face"));
+        addResizeHandles(panel);
     }
 
     //////////////////////////////////////////////////////
@@ -768,7 +1120,7 @@
         const collapsed = force !== undefined ? force : !panel.classList.contains("qa-collapsed");
         panel.classList.toggle("qa-collapsed", collapsed);
         const btn = document.getElementById("qa-collapse");
-        if (btn) btn.textContent = collapsed ? "+" : "–";
+        if (btn) btn.innerHTML = svgIcon(collapsed ? "plus" : "minus");
         localStorage.setItem(STORAGE.collapsed, collapsed ? "1" : "0");
 
         if (collapsed) {
@@ -1012,8 +1364,30 @@
         panel.style.top   = "180px";
     }
 
+    // Persist the user-chosen panel size (set by dragging the resize corner).
+    // Only meaningful while expanded; collapsed/docked sizes are fixed by CSS.
+    function savePanelSize(panel) {
+        if (panel.classList.contains("qa-collapsed") || panel.classList.contains("qa-docked")) return;
+        localStorage.setItem(STORAGE.panelSize, JSON.stringify({
+            width:  panel.offsetWidth + "px",
+            height: panel.offsetHeight + "px"
+        }));
+    }
+
+    // Reapply a previously saved panel size to the expanded card.
+    function restorePanelSize(panel) {
+        try {
+            const size = JSON.parse(localStorage.getItem(STORAGE.panelSize) || "null");
+            if (size && size.width && size.height) {
+                panel.style.width  = size.width;
+                panel.style.height = size.height;
+            }
+        } catch (e) { /* ignore */ }
+    }
+
     function restorePanelState(panel) {
         restorePanelPosition(panel);
+        restorePanelSize(panel);
 
         if (localStorage.getItem(STORAGE.collapsed) === "1") {
             togglePanel(panel, true);
@@ -1021,6 +1395,88 @@
         if (localStorage.getItem(STORAGE.docked) === "1") {
             setDocked(panel, true);
         }
+    }
+
+    // Add drag handles to every edge and corner so the expanded panel can be
+    // resized from any side. Each handle adjusts width/height (and left/top for
+    // the west/north sides) within the min/max bounds.
+    function addResizeHandles(panel) {
+        const dirs = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+        dirs.forEach((dir) => {
+            const h = document.createElement("div");
+            h.className = "qa-rz qa-rz-" + dir;
+            panel.appendChild(h);
+            makeResizable(panel, h, dir);
+        });
+    }
+
+    function makeResizable(panel, handle, dir) {
+        const MIN_W = 260, MIN_H = 180;
+
+        handle.addEventListener("mousedown", (e) => {
+            // Don't resize while collapsed or docked.
+            if (panel.classList.contains("qa-collapsed") || panel.classList.contains("qa-docked")) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const startX = e.clientX, startY = e.clientY;
+            const rect = panel.getBoundingClientRect();
+            const startW = rect.width,  startH = rect.height;
+            const startLeft = rect.left, startTop = rect.top;
+            const rightEdge = rect.left + rect.width;
+            const bottomEdge = rect.top + rect.height;
+            const vw = document.documentElement.clientWidth;
+            const vh = document.documentElement.clientHeight;
+            const maxW = Math.round(vw * 0.96);
+            const maxH = Math.round(vh * 0.96);
+            const clamp = (v, min, max) => Math.max(min, Math.min(v, max));
+
+            // Lock to left/top positioning so west/north edges can move the panel.
+            panel.style.left  = startLeft + "px";
+            panel.style.top   = startTop + "px";
+            panel.style.right = "auto";
+            panel.classList.add("qa-resizing");
+
+            function onMove(ev) {
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                let w = startW, h = startH, left = startLeft, top = startTop;
+
+                if (dir.indexOf("e") !== -1) {
+                    w = clamp(startW + dx, MIN_W, Math.min(maxW, vw - startLeft));
+                }
+                if (dir.indexOf("w") !== -1) {
+                    w = clamp(startW - dx, MIN_W, Math.min(maxW, rightEdge));
+                    left = rightEdge - w;
+                }
+                if (dir.indexOf("s") !== -1) {
+                    h = clamp(startH + dy, MIN_H, Math.min(maxH, vh - startTop));
+                }
+                if (dir.indexOf("n") !== -1) {
+                    h = clamp(startH - dy, MIN_H, Math.min(maxH, bottomEdge));
+                    top = bottomEdge - h;
+                }
+
+                panel.style.width  = w + "px";
+                panel.style.height = h + "px";
+                panel.style.left   = left + "px";
+                panel.style.top    = top + "px";
+            }
+
+            function onUp() {
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                panel.classList.remove("qa-resizing");
+                savePanelSize(panel);
+                localStorage.setItem(STORAGE.panelPos, JSON.stringify({
+                    left: panel.style.left,
+                    top:  panel.style.top
+                }));
+            }
+
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+        });
     }
 
     //////////////////////////////////////////////////////
@@ -1087,60 +1543,243 @@
     const style = document.createElement("style");
     style.textContent = `
 #qa-panel{
+    /* -------- Typography -------- */
+    --qa-font: "Inter", "SF Pro Text", "SF Pro", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --qa-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, "Liberation Mono", monospace;
+
+    /* -------- Design tokens --------
+       Colours / shadows / gradient live here as CSS custom properties so dark
+       mode can override tokens (#qa-panel.qa-dark) instead of duplicating
+       every rule. Changing the brand blue = edit one line. */
+    --qa-brand:            #1976d2;
+    --qa-brand-hover:      #1565c0;
+    --qa-brand-strong:     #0d47a1;
+    --qa-brand-tint:       #eef4fb;
+    --qa-brand-active-bg:  #e7f0fb;
+    --qa-brand-focus-ring: rgba(25,118,210,.15);
+
+    --qa-accent:           #7b3fe4;
+    --qa-accent-hover:     #6a2fd0;
+    --qa-accent-bg:        #f0eefe;
+    --qa-accent-text:      #3a2a6b;
+    --qa-accent-focus-ring:rgba(123,63,228,.15);
+
+    --qa-danger:           #e53935;
+    --qa-danger-bg:        #fde8e8;
+    --qa-danger-text:      #b12020;
+    --qa-ok:               #2e7d32;
+
+    --qa-text:             #1f2933;
+    --qa-text-soft:        #5b6070;
+    --qa-muted:            #8a94a6;
+    --qa-on-brand:         #ffffff;
+
+    --qa-surface:          rgba(255,255,255,.94);
+    --qa-surface-2:        #f7f9fb;
+    --qa-surface-3:        #fbfcfd;
+    --qa-surface-inset:    #eef1f4;
+    /* Very subtle darker tint used to "lift" grouped blocks (Description
+       Source wrap, AI review) off the panel body. Kept translucent so it
+       stacks nicely on the frosted-glass surface. */
+    --qa-surface-elevated: rgba(0,0,0,.025);
+
+    --qa-border:           #e4e7eb;
+    --qa-border-strong:    #dfe3e8;
+    --qa-divider:          #eceff3;
+
+    --qa-shadow:           0 10px 30px rgba(0,0,0,.18);
+    --qa-shadow-lg:        0 14px 40px rgba(0,0,0,.30);
+    --qa-shadow-btn:       0 1px 2px rgba(0,0,0,.06);
+    --qa-shadow-btn-hover: 0 2px 6px rgba(0,0,0,.06);
+
+    --qa-header-bg:        linear-gradient(135deg,rgba(44,62,80,.88),rgba(25,118,210,.88));
+
+    --qa-kbd-bg:           rgba(0,0,0,.08);
+    --qa-kbd-bg-inverse:   rgba(255,255,255,.25);
+
+    --qa-scroll-thumb:       #c9d1d9;
+    --qa-scroll-thumb-hover: #9aa5b1;
+
+    /* Radius scale — use these instead of raw pixel values so every rounded
+       element hits one of three consistent stops. sm = chips/kbd, md = cards
+       and buttons, lg = the outer panel. */
+    --qa-r-sm: 6px;
+    --qa-r-md: 8px;
+    --qa-r-lg: 12px;
+
     position:fixed;
     right:20px;
     top:180px;
     width:260px;
-    background:#ffffff;
-    border:1px solid #dfe3e8;
-    border-radius:12px;
+    background:var(--qa-surface);
+    border:1px solid var(--qa-border-strong);
+    border-radius:var(--qa-r-lg);
     overflow:hidden;
-    box-shadow:0 10px 30px rgba(0,0,0,.18);
+    box-shadow:var(--qa-shadow);
+    /* Frosted-glass panel: the whole card is slightly translucent and the
+       backdrop is blurred + saturated so the Redmine content behind shows
+       through as a soft mica-like tint. Body content stays highly legible
+       because the surface token is 94% opaque. */
+    backdrop-filter:blur(24px) saturate(160%);
+    -webkit-backdrop-filter:blur(24px) saturate(160%);
     z-index:2147483647;
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    font-family:var(--qa-font);
     font-size:13px;
-    color:#1f2933;
+    color:var(--qa-text);
     user-select:none;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    text-rendering:optimizeLegibility;
+    font-feature-settings:"cv11","ss01","ss03","kern";
+    font-variant-numeric:tabular-nums;
+    letter-spacing:-0.005em;
+    /* User-resizable when expanded via the .qa-rz handles on every edge and
+       corner. The current size is the minimum; it can grow up to nearly the
+       full viewport. */
+    display:flex;
+    flex-direction:column;
+    min-width:300px;
+    min-height:180px;
+    max-width:96vw;
+    max-height:96vh;
+    /* Small fade + rise when the panel first mounts so it doesn't just pop
+       into place. See @keyframes qa-panel-in below. */
+    animation:qa-panel-in .18s ease-out both;
+}
+
+/* Launcher mode (dev.cloudapper.com / any non-Redmine host). Without the
+   Actions + Description Source sections the panel is shorter overall, and
+   the tight 180px minimum used to cut off the body before the version
+   footer at the bottom was visible. Raise the expanded-only minimum so the
+   whole launcher — trackers, projects, boards, version tag — fits without
+   scrolling on first paint. Overridden to 0 by the .qa-collapsed / .qa-docked
+   rules further down, so this only applies while expanded. */
+#qa-panel.qa-launcher{
+    min-height:440px;
+}
+
+/* Panel entry animation. Runs once on first mount. Skipped for users who
+   prefer reduced motion so it doesn't feel like an unnecessary distraction. */
+@keyframes qa-panel-in{
+    from{ opacity:0; transform:translateY(6px); }
+    to  { opacity:1; transform:translateY(0); }
+}
+@media (prefers-reduced-motion: reduce){
+    #qa-panel{ animation:none; }
+}
+/* Force the modern font on every descendant \u2014 including form controls, which
+   don't inherit font-family by default \u2014 and defeat any Redmine host styles. */
+#qa-panel,
+#qa-panel *:not(.qa-template-input):not(pre):not(code):not(kbd){
+    font-family:var(--qa-font) !important;
+}
+#qa-panel .qa-template-input,
+#qa-panel pre,
+#qa-panel code{
+    font-family:var(--qa-font-mono) !important;
+}
+#qa-panel kbd{
+    font-family:var(--qa-font-mono) !important;
 }
 #qa-panel.qa-dragging{
-    box-shadow:0 14px 40px rgba(0,0,0,.30);
+    box-shadow:var(--qa-shadow-lg);
     opacity:.97;
 }
+#qa-panel.qa-resizing{
+    box-shadow:var(--qa-shadow-lg);
+}
+
+/* Resize handles on every edge and corner of the expanded panel. */
+.qa-rz{ position:absolute; z-index:5; }
+.qa-rz-n{ top:0; left:0; right:0; height:6px; cursor:ns-resize; }
+.qa-rz-s{ bottom:0; left:0; right:0; height:6px; cursor:ns-resize; }
+.qa-rz-e{ top:0; bottom:0; right:0; width:6px; cursor:ew-resize; }
+.qa-rz-w{ top:0; bottom:0; left:0; width:6px; cursor:ew-resize; }
+.qa-rz-ne{ top:0; right:0; width:14px; height:14px; cursor:nesw-resize; z-index:6; }
+.qa-rz-nw{ top:0; left:0; width:14px; height:14px; cursor:nwse-resize; z-index:6; }
+.qa-rz-se{ bottom:0; right:0; width:14px; height:14px; cursor:nwse-resize; z-index:6; }
+.qa-rz-sw{ bottom:0; left:0; width:14px; height:14px; cursor:nesw-resize; z-index:6; }
+/* Handles only apply to the expanded card. */
+#qa-panel.qa-collapsed .qa-rz,
+#qa-panel.qa-docked .qa-rz{ display:none; }
+
 .qa-header{
     display:flex;
     align-items:center;
     justify-content:space-between;
-    background:linear-gradient(135deg,#2c3e50,#1976d2);
-    color:#fff;
+    background:var(--qa-header-bg);
+    color:var(--qa-on-brand);
     padding:10px 12px;
     cursor:move;
+    /* Subtle top highlight sells the "glass" — a 1px specular line at the
+       very top of the header, like Big Sur / Windows 11 title bars. */
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.14);
 }
 .qa-title{
     font-weight:600;
     letter-spacing:.2px;
 }
 .qa-header-btns{
+    /* Toolbar-style capsule: individual buttons are transparent and share a
+       common translucent shell, giving the same grouped look as Chrome's
+       toolbar controls or Arc's window chrome. */
     display:flex;
-    gap:6px;
+    gap:0;
     align-items:center;
+    padding:2px;
+    background:rgba(255,255,255,.14);
+    border-radius:var(--qa-r-md);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);
 }
 .qa-hbtn{
     width:24px;
     height:24px;
     border:none;
-    border-radius:6px;
-    background:rgba(255,255,255,.18);
-    color:#fff;
+    border-radius:var(--qa-r-sm);
+    background:transparent;
+    color:var(--qa-on-brand);
     font-size:13px;
     line-height:1;
     cursor:pointer;
-    transition:background .15s ease;
+    transition:background .15s ease,transform .1s ease,box-shadow .15s ease;
     display:flex;
     align-items:center;
     justify-content:center;
     padding:0;
+    position:relative;
 }
-.qa-hbtn:hover{ background:rgba(255,255,255,.32); }
+.qa-hbtn:hover{ background:rgba(255,255,255,.22); }
+.qa-hbtn:active{ transform:scale(.92); }
+/* Hairline dividers between capsule buttons — rendered as a tiny
+   pseudo-element on every button after the first. Uses the flow direction
+   of .qa-header-btns so it flips to horizontal in vertical (docked) mode. */
+.qa-hbtn + .qa-hbtn::before{
+    content:"";
+    position:absolute;
+    left:-1px;
+    top:20%;
+    bottom:20%;
+    width:1px;
+    background:rgba(255,255,255,.16);
+    pointer-events:none;
+}
+#qa-panel.qa-collapsed-vert .qa-hbtn + .qa-hbtn::before{
+    left:20%;
+    right:20%;
+    top:-1px;
+    bottom:auto;
+    width:auto;
+    height:1px;
+}
+.qa-hbtn svg{
+    width:14px;
+    height:14px;
+    stroke:currentColor;
+    fill:none;
+    stroke-width:2;
+    stroke-linecap:round;
+    stroke-linejoin:round;
+}
 .qa-collapse{ font-size:16px; }
 
 /* Dock button is available in both expanded and collapsed states so the two
@@ -1148,9 +1787,19 @@
 
 /* Docked (edge-pinned) pill. */
 .qa-dock-face{ display:none; }
+/* Collapsed / docked states are fixed-size: cancel the resize affordance and
+   the expanded-panel min/max limits so their exact dimensions apply. */
+#qa-panel.qa-collapsed,
+#qa-panel.qa-docked{
+    resize:none;
+    min-width:0 !important;
+    min-height:0 !important;
+    max-width:none !important;
+    max-height:none !important;
+}
 #qa-panel.qa-docked{
     width:60px !important;
-    height:44px;
+    height:44px !important;
     border:0;
     border-radius:10px;
     overflow:hidden;
@@ -1164,8 +1813,8 @@
     justify-content:center;
     width:100%;
     height:100%;
-    background:linear-gradient(135deg,#2c3e50,#1976d2);
-    color:#fff;
+    background:var(--qa-header-bg);
+    color:var(--qa-on-brand);
     font-weight:700;
     font-size:14px;
     letter-spacing:.5px;
@@ -1193,7 +1842,7 @@
 /* On left/right edges the pill rotates to a vertical shape. */
 #qa-panel.qa-docked.qa-dock-vert{
     width:44px !important;
-    height:60px;
+    height:60px !important;
 }
 #qa-panel.qa-docked.qa-dock-vert .qa-dock-face{
     width:100%;
@@ -1202,11 +1851,27 @@
 
 .qa-body{
     padding:10px;
-    max-height:75vh;
+    flex:1 1 auto;
+    min-height:0;
     overflow-y:auto;
     overflow-x:hidden;
     transition:padding .25s ease,opacity .2s ease;
+    /* Custom thin scrollbar so the overflow doesn't render as a chunky
+       native Windows/GTK gutter that clashes with the rounded panel. The
+       track stays transparent; the thumb is a soft grey rounded pill. */
+    scrollbar-width:thin;
+    scrollbar-color:var(--qa-scroll-thumb) transparent;
+    scrollbar-gutter:stable;
 }
+.qa-body::-webkit-scrollbar{ width:8px; height:8px; }
+.qa-body::-webkit-scrollbar-track{ background:transparent; }
+.qa-body::-webkit-scrollbar-thumb{
+    background:var(--qa-scroll-thumb);
+    border-radius:8px;
+    border:2px solid transparent;
+    background-clip:padding-box;
+}
+.qa-body::-webkit-scrollbar-thumb:hover{ background:var(--qa-scroll-thumb-hover); }
 #qa-panel.qa-collapsed .qa-body{
     max-height:0;
     padding-top:0;
@@ -1218,8 +1883,8 @@
 /* Collapsed horizontal bar mirrors the expanded panel: same width, and the header
    keeps its default space-between layout so the title/buttons stay put. */
 #qa-panel.qa-collapsed:not(.qa-collapsed-vert):not(.qa-docked){
-    width:260px !important;
-    height:44px;
+    width:300px !important;
+    height:44px !important;
 }
 #qa-panel.qa-collapsed .qa-header{
     height:100%;
@@ -1233,7 +1898,7 @@
 /* Collapsed bar rotated to a vertical strip when pinned to a side edge. */
 #qa-panel.qa-collapsed.qa-collapsed-vert:not(.qa-docked){
     width:40px !important;
-    height:370px;
+    height:370px !important;
 }
 #qa-panel.qa-collapsed.qa-collapsed-vert .qa-header{
     flex-direction:column;
@@ -1251,15 +1916,133 @@
 }
 
 .qa-section-label{
+    position:relative;
     font-size:10px;
     text-transform:uppercase;
     letter-spacing:.6px;
-    color:#8a94a6;
+    color:var(--qa-muted);
     margin:4px 2px 6px;
+    padding-left:10px;
     font-weight:700;
 }
 
+/* Small brand-coloured accent bar to the left of every section header.
+   Applied to both plain labels and collapsible toggles so all section
+   titles share the same visual anchor. */
+.qa-section-label::before,
+.qa-section-toggle::before{
+    content:"";
+    position:absolute;
+    left:0;
+    top:50%;
+    width:3px;
+    height:12px;
+    background:var(--qa-brand);
+    border-radius:2px;
+    transform:translateY(-50%);
+}
+
+/* ---------- Report: tracker picker ---------- */
+.qa-report-substep{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:nowrap;
+    min-width:0;
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:.5px;
+    color:var(--qa-muted);
+    font-weight:700;
+    margin:8px 2px 6px;
+}
+.qa-report-substep[hidden]{ display:none; }
+.qa-project-step{ justify-content:space-between; }
+.qa-project-step > span:first-child{
+    flex:1 1 auto;
+    min-width:0;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+.qa-report-for{
+    flex:0 0 auto;
+    max-width:60%;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    text-transform:none;
+    letter-spacing:normal;
+    color:var(--qa-brand);
+    font-weight:600;
+}
+.qa-tracker-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px;
+    margin:2px 0 4px;
+}
+.qa-tracker-card{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    padding:8px 9px 8px 12px;
+    border:1px solid var(--qa-border);
+    border-radius:var(--qa-r-md);
+    background:var(--qa-surface-2);
+    color:var(--qa-text);
+    cursor:pointer;
+    font-family:inherit;
+    font-size:12px;
+    text-align:left;
+    transition:background .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease;
+}
+.qa-tracker-card:hover{ border-color:var(--qa-brand); }
+/* Fixed 1px border + inset 3px accent stripe on the active card. Zero layout
+   jitter (padding-left already reserves 12px for the stripe) instead of the
+   previous 1→ 2px border swap + padding compensation. */
+.qa-tracker-card.active{
+    border-color:var(--qa-brand);
+    background:var(--qa-brand-active-bg);
+    color:var(--qa-brand-strong);
+    font-weight:600;
+    box-shadow:inset 3px 0 0 var(--qa-brand);
+}
+.qa-tracker-emoji{ font-size:14px; line-height:1; flex-shrink:0; }
+
+.qa-project-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px;
+    margin:2px 0 4px;
+}
+.qa-project-grid[hidden]{ display:none; }
+.qa-project-card{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    padding:8px 9px;
+    border:1px solid var(--qa-border);
+    border-radius:var(--qa-r-md);
+    background:var(--qa-surface-2);
+    color:var(--qa-text);
+    cursor:pointer;
+    font-family:inherit;
+    font-size:12px;
+    text-align:left;
+    text-decoration:none;
+    transition:background .15s ease,border-color .15s ease,color .15s ease;
+}
+.qa-project-card,
+.qa-project-card:hover,
+.qa-project-card:focus,
+.qa-project-card:active,
+.qa-project-card:visited{ text-decoration:none; }
+.qa-project-card:hover{ border-color:var(--qa-brand); background:var(--qa-brand-tint); }
+.qa-project-emoji{ font-size:14px; line-height:1; flex-shrink:0; }
+
 .qa-section-toggle{
+    position:relative;
     display:flex;
     align-items:center;
     justify-content:space-between;
@@ -1267,79 +2050,143 @@
     background:transparent;
     border:none;
     cursor:pointer;
-    padding:4px 2px;
+    padding:4px 2px 4px 10px;
     margin:2px 0 4px;
     font-size:10px;
     text-transform:uppercase;
     letter-spacing:.6px;
-    color:#8a94a6;
+    color:var(--qa-muted);
     font-weight:700;
     font-family:inherit;
 }
-.qa-section-toggle:hover{ color:#1976d2; }
+.qa-section-toggle:hover{ color:var(--qa-brand); }
 .qa-caret{
     font-size:11px;
     line-height:1;
-    transition:transform .12s ease;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    transition:transform .18s cubic-bezier(.4,0,.2,1),color .15s ease;
+}
+.qa-caret svg{
+    width:12px;
+    height:12px;
+    stroke:currentColor;
+    fill:none;
+    stroke-width:2.2;
+    stroke-linecap:round;
+    stroke-linejoin:round;
+}
+/* Rotate the chevron when the section is open. Works whether the caret
+   contains text (▸) or an SVG chevron-right. Colour tweens to brand so the
+   whole toggle looks a touch more "active" while expanded. */
+.qa-caret.qa-caret-open{
+    transform:rotate(90deg);
+    color:var(--qa-brand);
+}
+.qa-section-toggle:hover .qa-caret{ color:var(--qa-brand); }
+
+/* Elevated "grouped panel" surface for the Description Source wrap so the
+   template + AI subsections read as a single tool card instead of a loose
+   stack of controls right after the toggle. Subtle 1px border + tiny inset
+   shadow lift it off the frosted body. */
+.qa-tmpl-wrap:not([hidden]){
+    background:var(--qa-surface-elevated);
+    border:1px solid var(--qa-border);
+    border-radius:10px;
+    padding:10px;
+    margin:0 0 6px;
+    box-shadow:var(--qa-shadow-btn);
 }
 .qa-tmpl-wrap[hidden]{ display:none; }
 
 .qa-btn{
+    position:relative;
     display:flex;
     align-items:center;
     justify-content:space-between;
     width:100%;
     box-sizing:border-box;
-    padding:9px 10px;
+    padding:9px 10px 9px 13px;
     margin-bottom:6px;
-    border:1px solid #e4e7eb;
-    border-radius:8px;
-    background:#f7f9fb;
-    color:#1f2933;
+    border:1px solid var(--qa-border);
+    border-radius:var(--qa-r-md);
+    background:var(--qa-surface-2);
+    color:var(--qa-text);
     cursor:pointer;
     font-size:13px;
     text-align:left;
     text-decoration:none;
-    transition:background .15s ease,border-color .15s ease,transform .05s ease;
+    overflow:hidden;
+    transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,transform .08s ease;
+}
+/* Growing brand-coloured accent bar on the left — 0 px by default, animates to
+   3 px on hover. Feels like a modern Linear/GitHub row indicator instead of
+   the old "slam the whole button to solid brand" hover. */
+.qa-btn::before{
+    content:"";
+    position:absolute;
+    left:0;
+    top:0;
+    bottom:0;
+    width:0;
+    background:var(--qa-brand);
+    transition:width .18s cubic-bezier(.4,0,.2,1);
+    pointer-events:none;
 }
 .qa-btn:hover{
-    background:#1976d2;
-    border-color:#1976d2;
-    color:#fff;
+    background:var(--qa-brand-tint);
+    border-color:color-mix(in srgb, var(--qa-brand) 30%, var(--qa-border));
+    color:var(--qa-text);
+    box-shadow:var(--qa-shadow-btn-hover);
 }
+.qa-btn:hover::before{ width:3px; }
 /* Beat the Redmine theme's a:hover underline (higher specificity). */
 #qa-panel .qa-btn:hover,
 #qa-panel .qa-btn:focus,
 #qa-panel .qa-btn:active{
     text-decoration:none;
 }
-.qa-btn:active{ transform:translateY(1px); }
+.qa-btn:active{
+    transform:scale(.985);
+    box-shadow:none;
+}
+/* Soft focus rings on every interactive control. Uses a box-shadow ring
+   (which follows the element's border-radius) plus a matching outline for
+   Windows High Contrast Mode, instead of the old hard 2px outline that
+   left a squared-off halo around rounded corners. */
 .qa-btn:focus-visible,
 .qa-hbtn:focus-visible,
-.qa-section-toggle:focus-visible{
-    outline:2px solid #1976d2;
+.qa-section-toggle:focus-visible,
+.qa-mode-btn:focus-visible,
+.qa-tracker-card:focus-visible{
+    outline:2px solid transparent;
     outline-offset:2px;
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--qa-brand) 30%, transparent);
 }
 .qa-btn kbd{
     font-family:inherit;
     font-size:10px;
-    background:rgba(0,0,0,.08);
+    background:var(--qa-kbd-bg);
     color:inherit;
     border-radius:4px;
     padding:1px 6px;
     margin-left:8px;
     opacity:.75;
 }
-.qa-btn:hover kbd{ background:rgba(255,255,255,.25); }
 
+/* Danger buttons (Clear Form) reuse the soft-hover pattern: red accent bar
+   on the left + a warm danger tint background instead of slamming solid red. */
+.qa-danger::before{ background:var(--qa-danger); }
 .qa-danger:hover{
-    background:#e53935;
-    border-color:#e53935;
+    background:var(--qa-danger-bg);
+    border-color:color-mix(in srgb, var(--qa-danger) 35%, var(--qa-border));
+    color:var(--qa-danger-text);
 }
 
 .qa-divider{
     height:1px;
-    background:#eceff3;
+    background:var(--qa-divider);
     margin:8px 0;
 }
 
@@ -1350,22 +2197,25 @@
     resize:vertical;
     padding:8px 9px;
     margin-bottom:6px;
-    border:1px solid #e4e7eb;
+    border:1px solid var(--qa-border);
     border-radius:8px;
-    background:#fbfcfd;
-    color:#1f2933;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    background:var(--qa-surface-3);
+    color:var(--qa-text);
+    font-family:var(--qa-font-mono);
     font-size:12px;
     line-height:1.45;
     user-select:text;
-    white-space:pre;
-    overflow:auto;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+    overflow-x:hidden;
+    overflow-y:auto;
     transition:border-color .15s ease,box-shadow .15s ease;
 }
 .qa-template-input:focus{
     outline:none;
-    border-color:#1976d2;
-    box-shadow:0 0 0 3px rgba(25,118,210,.15);
+    border-color:var(--qa-brand);
+    box-shadow:0 0 0 3px var(--qa-brand-focus-ring);
 }
 
 .qa-template-actions{
@@ -1378,68 +2228,86 @@
     font-size:12px;
 }
 
-/* ---------- AI mode ---------- */
+/* ---------- AI mode: segmented toggle with sliding indicator ---------- */
 .qa-mode-switch{
+    position:relative;
+    display:flex;
+    gap:3px;
+    padding:3px;
+    margin:2px 0 10px;
+    background:var(--qa-surface-inset);
+    border-radius:8px;
+    user-select:none;
+}
+/* The sliding pill sits behind the two buttons. Its horizontal position is
+   driven by [data-active] on the container so the movement is pure CSS — the
+   JS handler just flips the attribute. Width = half the container minus the
+   3px padding on both sides + the 3px gap between the buttons. */
+.qa-mode-switch::before{
+    content:"";
+    position:absolute;
+    top:3px;
+    bottom:3px;
+    left:3px;
+    width:calc((100% - 9px) / 2);
+    background:var(--qa-surface);
+    border:1px solid var(--qa-border);
+    border-radius:6px;
+    box-shadow:var(--qa-shadow-btn);
+    transform:translateX(0);
+    transition:transform .22s cubic-bezier(.4,0,.2,1), border-color .15s ease;
+    z-index:0;
+    pointer-events:none;
+}
+.qa-mode-switch[data-active="ai"]::before{
+    transform:translateX(calc(100% + 3px));
+    border-color:color-mix(in srgb, var(--qa-accent) 35%, var(--qa-border));
+}
+.qa-mode-btn{
+    position:relative;
+    z-index:1;
+    flex:1;
     display:flex;
     align-items:center;
     justify-content:center;
-    gap:8px;
-    margin:2px 0 10px;
-    cursor:pointer;
-    user-select:none;
-}
-.qa-mode-name{
-    font-size:11px;
+    gap:6px;
+    padding:7px 0;
+    border:1px solid transparent;
+    border-radius:6px;
+    background:transparent;
+    color:var(--qa-text-soft);
+    font-family:inherit;
+    font-size:12px;
     font-weight:600;
-    color:#8a94a6;
+    cursor:pointer;
     transition:color .15s ease;
 }
-.qa-mode-name[data-mode="template"]{ color:#1f2933; }
-.qa-mode-switch.qa-ai-on .qa-mode-name[data-mode="template"]{ color:#8a94a6; }
-.qa-mode-switch.qa-ai-on .qa-mode-name[data-mode="ai"]{ color:#7b3fe4; }
-.qa-switch{ position:relative; display:inline-block; width:34px; height:18px; }
-.qa-switch input{ position:absolute; opacity:0; width:0; height:0; }
-.qa-switch-track{
-    position:absolute;
-    inset:0;
-    background:#cbd2d9;
-    border-radius:999px;
-    transition:background .18s ease;
-}
-.qa-switch-track::before{
-    content:"";
-    position:absolute;
-    top:2px;
-    left:2px;
-    width:14px;
-    height:14px;
-    background:#fff;
-    border-radius:50%;
-    box-shadow:0 1px 3px rgba(0,0,0,.3);
-    transition:transform .18s ease;
-}
-.qa-switch input:checked + .qa-switch-track{ background:#7b3fe4; }
-.qa-switch input:checked + .qa-switch-track::before{ transform:translateX(16px); }
+.qa-mode-btn:hover{ color:var(--qa-text); }
+.qa-mode-btn.active{ color:var(--qa-text); }
+.qa-mode-btn[data-mode="ai"].active{ color:var(--qa-accent); }
 
 .qa-ai-field{
     width:100%;
     box-sizing:border-box;
     padding:8px 9px;
     margin-bottom:6px;
-    border:1px solid #e4e7eb;
+    border:1px solid var(--qa-border);
     border-radius:8px;
-    background:#fbfcfd;
-    color:#1f2933;
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    background:var(--qa-surface-3);
+    color:var(--qa-text);
+    font-family:var(--qa-font);
     font-size:12px;
     line-height:1.45;
     user-select:text;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+    word-break:break-word;
     transition:border-color .15s ease,box-shadow .15s ease;
 }
 .qa-ai-field:focus{
     outline:none;
-    border-color:#7b3fe4;
-    box-shadow:0 0 0 3px rgba(123,63,228,.15);
+    border-color:var(--qa-accent);
+    box-shadow:0 0 0 3px var(--qa-accent-focus-ring);
 }
 .qa-ai-compose{ resize:vertical; min-height:52px; }
 
@@ -1454,6 +2322,20 @@
 }
 .qa-ai-key-edit{ display:flex; gap:6px; align-items:stretch; flex:1; }
 .qa-ai-key-edit[hidden]{ display:none; }
+
+/* Mask the API key without using type="password" — that prevents browsers and
+   password managers (Chrome, 1Password, LastPass, …) from attaching autofill
+   to unrelated text inputs on the same page. Falls back to plain text on
+   engines that don't support -webkit-text-security. */
+.qa-secret{
+    -webkit-text-security:disc;
+    letter-spacing:0.05em;
+}
+.qa-icon-btn{
+    width:auto;
+    padding:0 8px;
+    line-height:1;
+}
 .qa-ai-key-saved{
     display:flex;
     gap:6px;
@@ -1466,7 +2348,7 @@
     flex:1;
     font-size:12px;
     font-weight:600;
-    color:#2e7d32;
+    color:var(--qa-ok);
 }
 .qa-ai-key-saved .qa-tmpl-btn{
     width:auto;
@@ -1481,7 +2363,7 @@
     margin-bottom:8px;
     font-size:12px;
     font-weight:600;
-    color:#1f2933;
+    color:var(--qa-text);
 }
 .qa-ai-model-row > span{ flex:0 0 auto; }
 .qa-ai-model-row select.qa-ai-field{
@@ -1500,7 +2382,18 @@
     max-height:220px;
     overflow-y:auto;
     margin-bottom:8px;
+    scrollbar-width:thin;
+    scrollbar-color:var(--qa-scroll-thumb) transparent;
 }
+.qa-ai-chat::-webkit-scrollbar{ width:8px; }
+.qa-ai-chat::-webkit-scrollbar-track{ background:transparent; }
+.qa-ai-chat::-webkit-scrollbar-thumb{
+    background:var(--qa-scroll-thumb);
+    border-radius:8px;
+    border:2px solid transparent;
+    background-clip:padding-box;
+}
+.qa-ai-chat::-webkit-scrollbar-thumb:hover{ background:var(--qa-scroll-thumb-hover); }
 .qa-ai-chat:empty{ display:none; }
 .qa-bubble{
     max-width:90%;
@@ -1513,40 +2406,103 @@
 }
 .qa-bubble-user{
     align-self:flex-end;
-    background:#1976d2;
-    color:#fff;
+    background:var(--qa-brand);
+    color:var(--qa-on-brand);
     border-bottom-right-radius:3px;
 }
 .qa-bubble-ai{
     align-self:flex-start;
-    background:#f0eefe;
-    color:#3a2a6b;
+    background:var(--qa-accent-bg);
+    color:var(--qa-accent-text);
     border-bottom-left-radius:3px;
 }
 .qa-bubble-error{
-    background:#fde8e8;
-    color:#b12020;
+    background:var(--qa-danger-bg);
+    color:var(--qa-danger-text);
+}
+
+/* Typing indicator — three dots that pulse in sequence, replacing the static
+   "Thinking…" text while awaiting an AI response. Bubble keeps its normal
+   .qa-bubble-ai styling; the class is removed once real content arrives. */
+.qa-bubble.qa-typing{
+    padding:10px 14px;
+    line-height:1;
+}
+.qa-dot{
+    display:inline-block;
+    width:6px;
+    height:6px;
+    margin:0 2px;
+    border-radius:50%;
+    background:currentColor;
+    opacity:.35;
+    vertical-align:middle;
+    animation:qa-dot-pulse 1.2s infinite ease-in-out;
+}
+.qa-dot:first-child{ margin-left:0; }
+.qa-dot:last-child{ margin-right:0; }
+.qa-dot:nth-child(2){ animation-delay:.18s; }
+.qa-dot:nth-child(3){ animation-delay:.36s; }
+@keyframes qa-dot-pulse{
+    0%, 60%, 100%{ opacity:.35; transform:scale(1); }
+    30%          { opacity:1;   transform:scale(1.15); }
 }
 
 .qa-ai-review{
-    margin-top:6px;
-    padding-top:8px;
-    border-top:1px dashed #e4e7eb;
+    margin-top:8px;
+    padding:10px;
+    background:var(--qa-surface-elevated);
+    border:1px solid var(--qa-border);
+    border-radius:10px;
+    box-shadow:var(--qa-shadow-btn);
+}
+/* Fresh-draft reveal animation. The review card is easy to miss when it
+   appears below the fold after Structure runs — pulse a soft brand-tinted
+   halo (that fades out) plus a tiny slide-in to draw the eye. Runs each
+   time a new draft comes back; combined with a scrollIntoView() in JS so
+   the card is guaranteed to be on-screen. */
+@keyframes qa-ai-review-in{
+    0%{
+        opacity:0;
+        transform:translateY(-8px);
+        box-shadow:0 0 0 3px color-mix(in srgb, var(--qa-brand) 55%, transparent), var(--qa-shadow-btn);
+    }
+    60%{
+        opacity:1;
+        transform:translateY(0);
+        box-shadow:0 0 0 3px color-mix(in srgb, var(--qa-brand) 35%, transparent), var(--qa-shadow-btn);
+    }
+    100%{
+        opacity:1;
+        transform:translateY(0);
+        box-shadow:var(--qa-shadow-btn);
+    }
+}
+.qa-ai-review.qa-ai-review-reveal{
+    animation:qa-ai-review-in .6s cubic-bezier(.2,.8,.2,1);
+}
+@media (prefers-reduced-motion: reduce){
+    .qa-ai-review.qa-ai-review-reveal{ animation:none; }
 }
 .qa-ai-fill{
-    background:#7b3fe4;
-    border-color:#7b3fe4;
-    color:#fff;
+    background:var(--qa-accent);
+    border-color:var(--qa-accent);
+    color:var(--qa-on-brand);
+    padding-left:10px; /* no accent bar here (button is already filled) */
 }
+/* The .qa-btn::before accent bar would be invisible over the filled accent
+   background anyway; hide it so it doesn't compete with the solid fill. */
+.qa-ai-fill::before{ display:none; }
 .qa-ai-fill:hover{
-    background:#6a2fd0;
-    border-color:#6a2fd0;
-    color:#fff;
+    background:var(--qa-accent-hover);
+    border-color:var(--qa-accent-hover);
+    color:var(--qa-on-brand);
+    box-shadow:var(--qa-shadow-btn-hover);
 }
 
 .qa-version{
     text-align:center;
-    color:#8a94a6;
+    color:var(--qa-muted);
     font-size:10px;
     letter-spacing:.4px;
     margin-top:10px;
@@ -1561,7 +2517,7 @@
     color:#fff;
     padding:10px 18px;
     border-radius:8px;
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    font-family:"Inter", "SF Pro Text", "SF Pro", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size:13px;
     box-shadow:0 6px 20px rgba(0,0,0,.25);
     opacity:0;
@@ -1574,65 +2530,46 @@
     transform:translateX(-50%) translateY(0);
 }
 
-/* ---------- Dark mode ---------- */
+/* ---------- Dark mode: token overrides ----------
+   Almost every rule above reads its colour from a CSS variable, so dark mode
+   only has to override the tokens on #qa-panel.qa-dark. A handful of things
+   (the sliding indicator, chat bubbles) inherit automatically. */
 #qa-panel.qa-dark{
-    background:#1f2933;
-    border-color:#3a4553;
-    color:#e4e7eb;
-}
-#qa-panel.qa-dark .qa-section-label,
-#qa-panel.qa-dark .qa-section-toggle{ color:#9aa5b1; }
-#qa-panel.qa-dark .qa-section-toggle:hover{ color:#4a9eff; }
-#qa-panel.qa-dark .qa-btn:focus-visible,
-#qa-panel.qa-dark .qa-hbtn:focus-visible,
-#qa-panel.qa-dark .qa-section-toggle:focus-visible{ outline-color:#4a9eff; }
-#qa-panel.qa-dark .qa-btn{
-    background:#2c3846;
-    border-color:#3a4553;
-    color:#e4e7eb;
-}
-#qa-panel.qa-dark .qa-btn:hover{
-    background:#1976d2;
-    border-color:#1976d2;
-    color:#fff;
-}
-#qa-panel.qa-dark .qa-btn kbd{ background:rgba(255,255,255,.12); }
-#qa-panel.qa-dark .qa-danger:hover{
-    background:#e53935;
-    border-color:#e53935;
-}
-#qa-panel.qa-dark .qa-divider{ background:#3a4553; }
-#qa-panel.qa-dark .qa-version{ color:#9aa5b1; }
-#qa-panel.qa-dark .qa-template-input{
-    background:#263340;
-    border-color:#3a4553;
-    color:#e4e7eb;
-}
-#qa-panel.qa-dark .qa-template-input:focus{
-    border-color:#4a9eff;
-    box-shadow:0 0 0 3px rgba(74,158,255,.2);
-}
+    --qa-brand:            #4a9eff;
+    --qa-brand-hover:      #3a8ae8;
+    --qa-brand-strong:     #cfe4ff;
+    --qa-brand-tint:       #33445a;
+    --qa-brand-active-bg:  #1e3a5f;
+    --qa-brand-focus-ring: rgba(74,158,255,.22);
 
-/* Dark mode — AI assistant */
-#qa-panel.qa-dark .qa-mode-name{ color:#9aa5b1; }
-#qa-panel.qa-dark .qa-mode-name[data-mode="template"]{ color:#e4e7eb; }
-#qa-panel.qa-dark .qa-mode-switch.qa-ai-on .qa-mode-name[data-mode="template"]{ color:#9aa5b1; }
-#qa-panel.qa-dark .qa-mode-switch.qa-ai-on .qa-mode-name[data-mode="ai"]{ color:#b79cff; }
-#qa-panel.qa-dark .qa-switch-track{ background:#4a5563; }
-#qa-panel.qa-dark .qa-ai-field{
-    background:#263340;
-    border-color:#3a4553;
-    color:#e4e7eb;
+    --qa-accent:           #b79cff;
+    --qa-accent-hover:     #9d80f2;
+    --qa-accent-bg:        #2f2a4a;
+    --qa-accent-text:      #d9d2f5;
+    --qa-accent-focus-ring:rgba(123,63,228,.25);
+
+    --qa-danger-bg:        #4a2020;
+    --qa-danger-text:      #ff9d9d;
+    --qa-ok:               #81c784;
+
+    --qa-text:             #e4e7eb;
+    --qa-text-soft:        #9aa5b1;
+    --qa-muted:            #9aa5b1;
+
+    --qa-surface:          rgba(31,41,51,.92);
+    --qa-surface-2:        #2c3846;
+    --qa-surface-3:        #263340;
+    --qa-surface-inset:    #252f3a;
+    --qa-surface-elevated: rgba(255,255,255,.04);
+
+    --qa-border:           #3a4553;
+    --qa-border-strong:    #3a4553;
+    --qa-divider:          #3a4553;
+
+    --qa-kbd-bg:           rgba(255,255,255,.12);
+    --qa-scroll-thumb:       #3a4553;
+    --qa-scroll-thumb-hover: #52616f;
 }
-#qa-panel.qa-dark .qa-ai-field:focus{
-    border-color:#b79cff;
-    box-shadow:0 0 0 3px rgba(123,63,228,.25);
-}
-#qa-panel.qa-dark .qa-bubble-ai{ background:#2f2a4a; color:#d9d2f5; }
-#qa-panel.qa-dark .qa-bubble-error{ background:#4a2020; color:#ff9d9d; }
-#qa-panel.qa-dark .qa-ai-review{ border-top-color:#3a4553; }
-#qa-panel.qa-dark .qa-ai-model-row{ color:#e4e7eb; }
-#qa-panel.qa-dark .qa-ai-key-status{ color:#81c784; }
 `;
     document.head.appendChild(style);
 
@@ -1670,9 +2607,32 @@
 
     let qaInitialized = false;
 
+    // Load Inter from Google Fonts so the modern typography actually renders on
+    // machines where Inter (or Segoe UI Variable / SF Pro) is not installed.
+    // Fails silently if the page's CSP blocks fonts.googleapis.com — the CSS
+    // font stack then falls back to the OS default.
+    function loadModernFont() {
+        if (document.getElementById("qa-font-link")) return;
+        const preconnect1 = document.createElement("link");
+        preconnect1.rel = "preconnect";
+        preconnect1.href = "https://fonts.googleapis.com";
+        const preconnect2 = document.createElement("link");
+        preconnect2.rel = "preconnect";
+        preconnect2.href = "https://fonts.gstatic.com";
+        preconnect2.crossOrigin = "anonymous";
+        const link = document.createElement("link");
+        link.id = "qa-font-link";
+        link.rel = "stylesheet";
+        link.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap";
+        (document.head || document.documentElement).appendChild(preconnect1);
+        (document.head || document.documentElement).appendChild(preconnect2);
+        (document.head || document.documentElement).appendChild(link);
+    }
+
     function init() {
         if (qaInitialized) return;
         qaInitialized = true;
+        loadModernFont();
         createPanel();
         initShortcuts();
         consumeProjectHash();

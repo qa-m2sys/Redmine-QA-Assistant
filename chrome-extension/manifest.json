@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "QA Assistant for Redmine",
-  "version": "5.2.0",
+  "version": "5.31.0",
   "description": "Switch project, auto-fill bug template, AI bug-report assistant, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools.",
   "icons": {
     "16": "icons/icon16.png",

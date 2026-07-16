@@ -15,24 +15,44 @@
     // as a launcher, so Report Bug / board links must be absolute Redmine URLs.
     const REDMINE = "https://redmine.kernello.com";
 
-    // The ?issue[tracker_id]=1 query makes Redmine render the NEW issue form for
-    // the Bug tracker server-side. This ensures Bug-specific fields (e.g.
-    // "Affected version") are present on load, without any client-side AJAX
-    // reload (which caused a stuck "Loading..." spinner).
+    // Redmine renders the NEW issue form server-side for whichever tracker is in
+    // the ?issue[tracker_id]=<id> query, so tracker-specific fields (e.g. Bug's
+    // "Affected version") are present on load without any client-side AJAX reload
+    // (which caused a stuck "Loading..." spinner). "path" is the base new-issue
+    // URL; the selected tracker id is appended per navigation.
     const PROJECTS = {
-        web:     { label: "🌐 Web",     url: "/projects/web-app-version-2/issues/new?issue[tracker_id]=1", board: "/projects/web-app-version-2/agile/board", version: "2216", assignee: "CloudApper Web Team" },
-        backend: { label: "⚙️ Backend", url: "/projects/backend/issues/new?issue[tracker_id]=1",     board: "/projects/backend/agile/board",     version: "2215", assignee: "CloudApper Backend Team" },
-        ios:     { label: "🍎 iOS",     url: "/projects/ios-app/issues/new?issue[tracker_id]=1",     board: "/projects/ios-app/agile/board",     version: "2163", assignee: "CloudApper iOS Team" },
-        android: { label: "🤖 Android", url: "/projects/android-app/issues/new?issue[tracker_id]=1", board: "/projects/android-app/agile/board", version: "2206", assignee: "CloudApper Android Team" }
+        web:     { label: "🌐 Web",     path: "/projects/web-app-version-2/issues/new", board: "/projects/web-app-version-2/agile/board", version: "2216", assignee: "CloudApper Web Team" },
+        backend: { label: "⚙️ Backend", path: "/projects/backend/issues/new",           board: "/projects/backend/agile/board",           version: "2215", assignee: "CloudApper Backend Team" },
+        ios:     { label: "🍎 iOS",     path: "/projects/ios-app/issues/new",           board: "/projects/ios-app/agile/board",           version: "2163", assignee: "CloudApper iOS Team" },
+        android: { label: "🤖 Android", path: "/projects/android-app/issues/new",       board: "/projects/android-app/agile/board",       version: "2206", assignee: "CloudApper Android Team" }
     };
 
     // Order in which project buttons are rendered, and their keyboard shortcut digit.
     const PROJECT_ORDER = ["web", "backend", "ios", "android"];
 
-    // Shipped default. Users can override this with their own template from the
-    // panel; their version is saved in localStorage (STORAGE.template) and used
-    // for Fill / Copy / auto-fill. "Reset" restores this default.
-    const DEFAULT_DESCRIPTION = `
+    // Redmine trackers the user can report under. The numeric ids match this
+    // Redmine instance; TRACKER_ORDER controls the grid order.
+    const TRACKERS = {
+        bug:        { id: "1", name: "Bug",        emoji: "🐞" },
+        feature:    { id: "2", name: "Feature",    emoji: "✨" },
+        task:       { id: "5", name: "Task",       emoji: "✅" },
+        userstory:  { id: "6", name: "User story", emoji: "📖" },
+        testcase:   { id: "7", name: "Test case",  emoji: "🧪" },
+        suggestion: { id: "4", name: "Suggestion", emoji: "💡" }
+    };
+    const TRACKER_ORDER = ["bug", "feature", "task", "userstory", "testcase", "suggestion"];
+    const DEFAULT_TRACKER = "bug";
+
+    // The tracker currently chosen in the panel; used by the project buttons and
+    // the Alt+1..4 shortcuts to decide which tracker the new issue opens under.
+    let selectedTracker = DEFAULT_TRACKER;
+
+    // Shipped defaults, keyed by tracker. Users can override any of them from
+    // the panel; overrides are saved per tracker in localStorage under
+    // STORAGE.template + "-" + <trackerKey> and used for Fill / Copy /
+    // auto-fill. "Reset" restores the shipped default for the current tracker.
+    const DEFAULT_DESCRIPTIONS = {
+        bug: `
 
 *Description:*
 
@@ -58,11 +78,88 @@
 *App:*
 *Form/Menu:*
 
-`;
+`,
+        feature: `
+
+*Summary:*
+
+
+*Description:*
+
+
+*Acceptance Criteria:*
+#
+#
+#
+
+*Notes:*
+
+`,
+        task: `
+
+*Objective:*
+
+
+*Details:*
+
+
+*Checklist:*
+#
+#
+#
+
+`,
+        userstory: `
+
+*User Story:*
+As a <role>, I want <goal> so that <benefit>.
+
+*Acceptance Criteria:*
+#
+#
+#
+
+*Notes:*
+
+`,
+        testcase: `
+
+*Objective:*
+
+
+*Preconditions:*
+
+
+*Test Steps:*
+#
+#
+#
+
+*Expected Result:*
+
+`,
+        suggestion: `
+
+*Suggestion:*
+
+
+*Current Behavior:*
+
+
+*Suggested Improvement:*
+
+
+*Benefit:*
+
+`
+    };
 
     const STORAGE = {
         project:   "qa-project",
+        tracker:   "qa-tracker-id",
+        lastTracker:"qa-last-tracker",
         panelPos:  "qa-panel-pos",
+        panelSize: "qa-panel-size",
         collapsed: "qa-panel-collapsed",
         docked:    "qa-panel-docked",
         dockPos:   "qa-panel-dock-pos",
@@ -78,6 +175,24 @@
 
     const MAX_AUTOFILL_TRIES = 40; // ~12s at 300ms
 
+    // Inline-SVG icon set used for the header buttons (moon/sun/pin/minus/plus),
+    // the section chevrons, and the API-key visibility toggle. Kept as raw
+    // strings so the render code can drop them straight into innerHTML. All
+    // shapes are stroke-only and inherit currentColor via CSS (see .qa-hbtn svg
+    // / .qa-caret svg in content.css), so they follow theme/hover colours
+    // automatically.
+    const QA_ICONS = {
+        moon:            '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+        sun:             '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v1M12 20v1M3 12h1M20 12h1M5.6 5.6l.7.7M17.7 17.7l.7.7M5.6 18.4l.7-.7M17.7 6.3l.7-.7"/></svg>',
+        pin:             '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+        minus:           '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14"/></svg>',
+        plus:            '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+        "chevron-right": '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+        eye:             '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+        "eye-off":       '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.5 19.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19M1 1l22 22M9.88 9.88a3 3 0 1 0 4.24 4.24"/></svg>'
+    };
+    const svgIcon = (name) => QA_ICONS[name] || "";
+
     // Default OpenAI model for the AI bug-report assistant.
     const AI_DEFAULT_MODEL = "gpt-4o";
 
@@ -92,14 +207,40 @@
             ? chrome.runtime.getManifest().version
             : "");
 
-    // Returns the user's saved template, or the shipped default if none set.
-    function getTemplate() {
-        const saved = localStorage.getItem(STORAGE.template);
-        return (saved !== null && saved !== "") ? saved : DEFAULT_DESCRIPTION;
+    // Storage key for a given tracker's template override. Bug used to live
+    // under the plain STORAGE.template key before the per-tracker split;
+    // getTemplate() below still reads that as a fallback.
+    function templateStorageKey(trackerKey) {
+        return STORAGE.template + "-" + trackerKey;
     }
 
-    function saveTemplate(text) {
-        localStorage.setItem(STORAGE.template, text);
+    // Returns the user's saved template for the given tracker (defaults to the
+    // currently active tracker) or the shipped default if none is set.
+    function getTemplate(trackerKey) {
+        const key = trackerKey || currentTrackerKey();
+        let saved = localStorage.getItem(templateStorageKey(key));
+        // Back-compat: the bug template used to live under the plain
+        // "qa-template" key before the per-tracker split.
+        if ((saved === null || saved === "") && key === "bug") {
+            saved = localStorage.getItem(STORAGE.template);
+        }
+        return (saved !== null && saved !== "")
+            ? saved
+            : (DEFAULT_DESCRIPTIONS[key] || DEFAULT_DESCRIPTIONS.bug);
+    }
+
+    function saveTemplate(text, trackerKey) {
+        const key = trackerKey || currentTrackerKey();
+        localStorage.setItem(templateStorageKey(key), text);
+        // Legacy bug key is now redundant; drop it so the per-tracker one
+        // stays authoritative.
+        if (key === "bug") localStorage.removeItem(STORAGE.template);
+    }
+
+    function resetTemplate(trackerKey) {
+        const key = trackerKey || currentTrackerKey();
+        localStorage.removeItem(templateStorageKey(key));
+        if (key === "bug") localStorage.removeItem(STORAGE.template);
     }
 
     //////////////////////////////////////////////////////
@@ -112,20 +253,81 @@
         setKey: (k) => localStorage.setItem(STORAGE.aiKey, (k || "").trim())
     };
 
+    // Returns the tracker key that best matches what is being reported: prefer the
+    // tracker actually selected in the Redmine issue form, then the panel choice.
+    function currentTrackerKey() {
+        const sel = document.getElementById("issue_tracker_id");
+        if (sel && sel.value) {
+            const key = Object.keys(TRACKERS).find((k) => TRACKERS[k].id === String(sel.value));
+            if (key) return key;
+        }
+        return selectedTracker;
+    }
+
     // Instructions that make the model return a predictable JSON shape so we can
     // split its answer into a chat reply plus reviewable subject/description.
+    // Each tracker gets its own noun, description template and guidance so the AI
+    // produces the right kind of report (bug, feature, user story, task, ...).
+    const TRACKER_PROMPTS = {
+        bug: {
+            noun: "bug report",
+            role: "A Bug describes something that is broken or behaving incorrectly and needs to be fixed.",
+            placeholder: "Describe the bug in rough words\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("bug"),
+            guide: "Under the *Description:* heading, write a concise 1-2 sentence summary of the bug: what is broken, where it happens, and the impact. Fill *Steps:* with the numbered actions needed to reproduce it and *Expected Scenario:* with what should happen instead. Keep the remaining placeholders for details the notes do not cover. Never leave *Description:* empty when the notes describe a problem."
+        },
+        feature: {
+            noun: "feature",
+            role: "A Feature describes a NEW capability that is being introduced or implemented \u2014 it is not a bug, a fix, or merely a request.",
+            placeholder: "Describe the new feature you're introducing\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("feature"),
+            guide: "Describe the new feature being added. Under *Summary:* give a one-line statement of what the feature is. Under *Description:* explain what it does, who it is for, and the value it delivers in 2-4 sentences. Under *Acceptance Criteria:* list concrete, testable conditions that must be met for the feature to be considered complete. Use *Notes:* for dependencies, edge cases, or open questions."
+        },
+        task: {
+            noun: "task",
+            role: "A Task is a concrete unit of work to be carried out (for example implementation, configuration, or investigation) \u2014 it is not a bug report.",
+            placeholder: "Describe the work to be done\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("task"),
+            guide: "Under *Objective:* state the goal of the task in 1-2 sentences. Under *Details:* add the context, scope, and any constraints or dependencies. Break the work into clear, independently verifiable steps under *Checklist:*."
+        },
+        userstory: {
+            noun: "user story",
+            role: "A User story captures a requirement from an end user's perspective and the value it provides.",
+            placeholder: "Describe the user need \u2014 role, goal, benefit\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("userstory"),
+            guide: "Fill *User Story:* using the \"As a <role>, I want <goal> so that <benefit>\" form, replacing the placeholders with the real role, goal, and benefit from the notes. Under *Acceptance Criteria:* list concrete, testable conditions that define when the story is done. Use *Notes:* for assumptions or related details."
+        },
+        testcase: {
+            noun: "test case",
+            role: "A Test case describes how to verify a specific behaviour, including the steps and the expected result.",
+            placeholder: "Describe what to test and the expected result\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("testcase"),
+            guide: "Under *Objective:* summarise what is being verified in one sentence. Under *Preconditions:* list the state or data required before testing. Provide clear, ordered actions under *Test Steps:* and describe the precise, observable outcome under *Expected Result:*."
+        },
+        suggestion: {
+            noun: "suggestion",
+            role: "A Suggestion proposes an improvement or idea; it is optional and is not a defect.",
+            placeholder: "Describe your suggestion or improvement idea\u2026 (Ctrl+Enter to send)",
+            template: () => getTemplate("suggestion"),
+            guide: "Under *Suggestion:* summarise the idea in 1-2 sentences. Under *Current Behavior:* describe how things work today, and under *Suggested Improvement:* what should change. Explain the value it adds under *Benefit:*."
+        }
+    };
+
     function aiSystemPrompt() {
+        const t = TRACKER_PROMPTS[currentTrackerKey()] || TRACKER_PROMPTS[DEFAULT_TRACKER];
         return [
-            "You are a QA assistant that turns a tester's rough notes into a well-structured Redmine bug report.",
+            "You are a QA assistant that turns rough notes into a well-structured Redmine " + t.noun + ".",
+            t.role,
             "Always respond with a JSON object containing exactly these keys:",
-            '- "reply": a short, friendly message to the tester (max 2 sentences) about what you produced or what you still need.',
-            '- "subject": a concise, specific bug title (<= 120 chars). Use an empty string if there is not enough information yet.',
-            '- "description": the full bug description formatted using EXACTLY this template structure, filling in what the notes provide and keeping the placeholders for anything missing:',
+            '- "reply": a short, friendly message to the reporter (max 2 sentences) about what you produced or what you still need.',
+            '- "subject": a concise, specific ' + t.noun + ' title (<= 120 chars). Use an empty string if there is not enough information yet.',
+            '- "description": the full ' + t.noun + ' formatted using EXACTLY this template structure, filling in what the notes provide and keeping the placeholders for anything missing:',
             "-----",
-            getTemplate(),
+            t.template(),
             "-----",
-            "Under the *Description:* heading, write a concise 1-2 sentence summary of the bug (what is broken and where). Never leave *Description:* empty when the notes describe a problem.",
-            "Only use facts the tester provided. Do not invent steps, credentials, or versions. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and give a best-effort subject/description."
+            t.guide,
+            "Keep the exact *Heading:* labels and the blank-line spacing from the template, and write in clear, professional English with each section kept focused.",
+            "Only use facts the reporter provided. Do not invent steps, credentials, versions, or acceptance criteria that the notes do not imply. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and give a best-effort subject/description."
         ].join("\n");
     }
 
@@ -185,7 +387,7 @@
         panel.classList.toggle("qa-dark", dark);
         const btn = document.getElementById("qa-theme");
         if (btn) {
-            btn.textContent = dark ? "☀️" : "🌙";
+            btn.innerHTML = svgIcon(dark ? "sun" : "moon");
             btn.title = dark ? "Switch to light mode" : "Switch to dark mode";
         }
     }
@@ -252,7 +454,12 @@
     }
 
     function fillIssue(project) {
-        setSelectSilently("issue_tracker_id", "1"); // Bug   (no AJAX reload)
+        // Prefer the tracker id carried by the hash marker (session storage);
+        // otherwise fall back to whichever tracker card is active in the panel
+        // so manual Fill Template respects the user's current selection.
+        const defaultId = (TRACKERS[selectedTracker] || TRACKERS[DEFAULT_TRACKER]).id;
+        const trackerId = sessionStorage.getItem(STORAGE.tracker) || defaultId;
+        setSelectSilently("issue_tracker_id", trackerId); // selected tracker (no AJAX reload)
         setSelectSilently("issue_status_id", "1");  // New   (no AJAX reload)
 
         setValue("issue_priority_id", "2");         // Normal (no reload handler)
@@ -320,18 +527,30 @@
     // Navigation
     //////////////////////////////////////////////////////
 
-    function gotoProject(project) {
-        if (!PROJECTS[project]) return;
-        // The #qa=<project> marker tells the new tab which project to auto-fill.
-        window.open(REDMINE + PROJECTS[project].url + "#qa=" + project, "_blank", "noopener");
+    // Build the new-issue URL for a project under a given tracker id. The
+    // #qa=<project>&t=<id> marker tells the opened tab which project to auto-fill
+    // (assignee) and which tracker to keep selected.
+    function newIssueUrl(project, trackerId) {
+        const p = PROJECTS[project];
+        if (!p) return "#";
+        return REDMINE + p.path + "?issue[tracker_id]=" + trackerId + "#qa=" + project + "&t=" + trackerId;
     }
 
-    // If the URL carries a #qa=<project> marker (from a Report Bug link/shortcut
-    // opened in a new tab), record it so auto-fill and manual Fill know the project.
+    function gotoProject(project) {
+        if (!PROJECTS[project]) return;
+        const t = TRACKERS[selectedTracker] || TRACKERS[DEFAULT_TRACKER];
+        window.open(newIssueUrl(project, t.id), "_blank", "noopener");
+    }
+
+    // If the URL carries a #qa=<project> marker (from a Report link/shortcut
+    // opened in a new tab), record it so auto-fill and manual Fill know the
+    // project and tracker.
     function consumeProjectHash() {
         const m = location.hash.match(/(?:^#|[#&])qa=([a-z]+)/i);
         if (m && PROJECTS[m[1]]) {
             sessionStorage.setItem(STORAGE.project, m[1]);
+            const tm = location.hash.match(/[#&]t=(\d+)/);
+            if (tm) sessionStorage.setItem(STORAGE.tracker, tm[1]);
             history.replaceState(null, "", location.pathname + location.search);
         }
     }
@@ -400,12 +619,30 @@
         // (they act on the issue form). On the app under test they are hidden.
         const onRedmine = location.origin === REDMINE;
 
-        const projectButtons = PROJECT_ORDER.map((key, i) => {
+        // Launcher hosts (dev.cloudapper.com etc.) show a shorter body \u2014 no
+        // Actions and no Description Source sections. Tag the panel so CSS can
+        // raise the expanded min-height enough to keep the version footer
+        // visible without scrolling.
+        if (!onRedmine) panel.classList.add("qa-launcher");
+
+        const projectButtons = PROJECT_ORDER.map((key) => {
             const p = PROJECTS[key];
-            return `<a class="qa-btn qa-project-btn" data-project="${key}"
-                        href="${REDMINE}${p.url}#qa=${key}" target="_blank" rel="noopener">
-                        <span>${p.label}</span><kbd>${i + 1}</kbd>
+            // Labels look like "🌐 Web" — split emoji from name so it renders
+            // like a tracker card (emoji chip + name).
+            const firstSpace = p.label.indexOf(" ");
+            const emoji = firstSpace > 0 ? p.label.slice(0, firstSpace) : "";
+            const name  = firstSpace > 0 ? p.label.slice(firstSpace + 1) : p.label;
+            return `<a class="qa-project-card qa-project-btn" data-project="${key}"
+                        href="${newIssueUrl(key, TRACKERS[DEFAULT_TRACKER].id)}" target="_blank" rel="noopener">
+                        <span class="qa-project-emoji">${emoji}</span><span>${name}</span>
                     </a>`;
+        }).join("");
+
+        const trackerCards = TRACKER_ORDER.map((key) => {
+            const t = TRACKERS[key];
+            return `<button class="qa-tracker-card" data-tracker="${key}" type="button">
+                        <span class="qa-tracker-emoji">${t.emoji}</span><span>${t.name}</span>
+                    </button>`;
         }).join("");
 
         const boardButtons = PROJECT_ORDER.map((key, i) => {
@@ -415,7 +652,7 @@
             return `<a class="qa-btn qa-board-btn" data-board="${key}"
                         href="${href}" target="_blank" rel="noopener"
                         title="${name} agile board" aria-label="${name} agile board">
-                        <span>${p.label}</span><kbd>⇧${i + 1}</kbd>
+                        <span>${p.label} Board</span><kbd>⇧${i + 1}</kbd>
                     </a>`;
         }).join("");
 
@@ -435,15 +672,14 @@
         const templateHtml = onRedmine ? `
                 <div class="qa-divider"></div>
                 <button class="qa-section-toggle" id="qa-tmpl-toggle" type="button" aria-expanded="false">
-                    <span>Description Template</span>
-                    <span class="qa-caret" id="qa-tmpl-caret">▸</span>
+                    <span>Step 3 · Description source</span>
+                    <span class="qa-caret" id="qa-tmpl-caret">${svgIcon("chevron-right")}</span>
                 </button>
                 <div class="qa-tmpl-wrap" id="qa-tmpl-wrap" hidden>
-                    <label class="qa-mode-switch" title="Switch between template editing and the AI assistant">
-                        <span class="qa-mode-name" data-mode="template">📝 Template</span>
-                        <span class="qa-switch"><input type="checkbox" id="qa-ai-toggle"><span class="qa-switch-track"></span></span>
-                        <span class="qa-mode-name" data-mode="ai">🤖 AI</span>
-                    </label>
+                    <div class="qa-mode-switch" id="qa-mode-switch" role="tablist" aria-label="Description source">
+                        <button type="button" class="qa-mode-btn active" data-mode="template">📝 Template</button>
+                        <button type="button" class="qa-mode-btn" data-mode="ai">🤖 AI</button>
+                    </div>
 
                     <div id="qa-tmpl-mode">
                         <textarea id="qa-template-input" class="qa-template-input"
@@ -462,8 +698,12 @@
                                 <button class="qa-btn qa-tmpl-btn" data-action="ai-change-key">Change</button>
                             </div>
                             <div class="qa-ai-key-edit" id="qa-ai-key-edit">
-                                <input type="password" id="qa-ai-key-input" class="qa-ai-field"
-                                       placeholder="OpenAI API key (sk-…)" autocomplete="off" spellcheck="false">
+                                <input type="text" id="qa-ai-key-input" class="qa-ai-field qa-secret"
+                                       placeholder="OpenAI API key (sk-…)"
+                                       autocomplete="off" spellcheck="false"
+                                       data-lpignore="true" data-1p-ignore data-form-type="other">
+                                <button class="qa-btn qa-tmpl-btn qa-icon-btn" type="button"
+                                        data-action="ai-toggle-key" title="Show / hide key">${svgIcon("eye")}</button>
                                 <button class="qa-btn qa-tmpl-btn" data-action="ai-save-key">🔑 Save</button>
                             </div>
                         </div>
@@ -494,33 +734,84 @@
             <div class="qa-header" id="qa-header">
                 <span class="qa-title">🚀 QA Assistant</span>
                 <div class="qa-header-btns">
-                    <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">🌙</button>
-                    <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">📌</button>
-                    <button class="qa-hbtn qa-collapse" id="qa-collapse" title="Collapse / Expand">–</button>
+                    <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">${svgIcon("moon")}</button>
+                    <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">${svgIcon("pin")}</button>
+                    <button class="qa-hbtn qa-collapse" id="qa-collapse" title="Collapse / Expand">${svgIcon("minus")}</button>
                 </div>
             </div>
             <div class="qa-dock-face" id="qa-dock-face" title="Click to restore QA Assistant">QA</div>
             <div class="qa-body" id="qa-body">
-                <div class="qa-section-label">Report Bug</div>
-                ${projectButtons}
-                ${actionsHtml}
+                <div class="qa-section-label">Report an Issue</div>
+                <div class="qa-report-substep">Step 1 · choose a tracker</div>
+                <div class="qa-tracker-grid" id="qa-tracker-grid">${trackerCards}</div>
+                <div class="qa-report-substep qa-project-step" id="qa-project-step" hidden>
+                    <span>Step 2 · choose a project</span>
+                    <span class="qa-report-for" id="qa-report-for"></span>
+                </div>
+                <div class="qa-project-grid" id="qa-project-list" hidden>${projectButtons}</div>
+                ${templateHtml}
                 <div class="qa-divider"></div>
                 <button class="qa-section-toggle" id="qa-boards-toggle" type="button" aria-expanded="false">
                     <span>Agile Boards</span>
-                    <span class="qa-caret" id="qa-boards-caret">▸</span>
+                    <span class="qa-caret" id="qa-boards-caret">${svgIcon("chevron-right")}</span>
                 </button>
                 <div class="qa-tmpl-wrap" id="qa-boards-wrap" hidden>
                     ${boardButtons}
                 </div>
-                ${templateHtml}
+                ${actionsHtml}
                 <div class="qa-version">${QA_VERSION ? "v" + QA_VERSION : ""}</div>
             </div>
         `;
 
         document.body.appendChild(panel);
 
-        // Report Bug links are plain <a target="_blank"> elements; the new tab
-        // reads the #qa=<project> marker in the URL to run auto-fill.
+        // Report links are plain <a target="_blank"> elements; the new tab reads
+        // the #qa=<project>&t=<tracker> marker in the URL to run auto-fill.
+
+        // ---- Report: pick a tracker, then reveal the project picker ----
+        const trackerGrid  = panel.querySelector("#qa-tracker-grid");
+        const projectStep  = panel.querySelector("#qa-project-step");
+        const projectList  = panel.querySelector("#qa-project-list");
+        const reportFor    = panel.querySelector("#qa-report-for");
+        const projectLinks = panel.querySelectorAll(".qa-project-btn");
+
+        // Refresh hook for the template editor — gets wired up further down in
+        // the onRedmine branch once #qa-template-input exists. applyTracker()
+        // calls it so switching trackers repopulates the textarea with the new
+        // tracker's saved / default template.
+        let refreshTemplateEditor = null;
+
+        // Keeps the AI compose textarea's placeholder aligned with the active
+        // tracker so the prompt hint matches the kind of report being written.
+        function refreshAiPlaceholder() {
+            const aiInputEl = panel.querySelector("#qa-ai-input");
+            if (!aiInputEl) return;
+            const t = TRACKER_PROMPTS[currentTrackerKey()] || TRACKER_PROMPTS[DEFAULT_TRACKER];
+            aiInputEl.placeholder = t.placeholder;
+        }
+
+        function applyTracker(key) {
+            const t = TRACKERS[key];
+            if (!t) return;
+            selectedTracker = key;
+            localStorage.setItem(STORAGE.lastTracker, key);
+            trackerGrid.querySelectorAll(".qa-tracker-card").forEach(c =>
+                c.classList.toggle("active", c.dataset.tracker === key));
+            reportFor.textContent = t.emoji + " " + t.name;
+            projectStep.hidden = false;
+            projectList.hidden = false;
+            projectLinks.forEach(a => { a.href = newIssueUrl(a.dataset.project, t.id); });
+            refreshAiPlaceholder();
+            if (refreshTemplateEditor) refreshTemplateEditor();
+        }
+        trackerGrid.querySelectorAll(".qa-tracker-card").forEach(card => {
+            card.addEventListener("click", (e) => {
+                e.stopPropagation();
+                applyTracker(card.dataset.tracker);
+            });
+        });
+        // Restore the last-used tracker (default Bug) so the picker is ready.
+        applyTracker(localStorage.getItem(STORAGE.lastTracker) || DEFAULT_TRACKER);
 
         // Agile board links: refresh the href just before navigation so it points
         // at the last-viewed board (or the current sprint) for that project.
@@ -542,22 +833,29 @@
 
             // Template editor
             const tmplInput = panel.querySelector("#qa-template-input");
-            tmplInput.value = getTemplate();
+            tmplInput.value = getTemplate(selectedTracker);
+            // Repopulate the editor whenever the selected tracker changes so the
+            // textarea always shows that tracker's saved (or default) template.
+            // Uses selectedTracker (the tracker card in the panel) rather than
+            // currentTrackerKey() so the editor stays in sync with the user's
+            // panel choice even if the Redmine form's tracker dropdown differs.
+            refreshTemplateEditor = () => { tmplInput.value = getTemplate(selectedTracker); };
             // Don't let clicks/keys inside the textarea trigger drag or shortcuts.
             tmplInput.addEventListener("mousedown", (e) => e.stopPropagation());
             tmplInput.addEventListener("keydown", (e) => e.stopPropagation());
             panel.querySelector('[data-action="save-template"]').addEventListener("click", () => {
-                saveTemplate(tmplInput.value);
+                saveTemplate(tmplInput.value, selectedTracker);
                 toast("Template saved");
             });
             panel.querySelector('[data-action="reset-template"]').addEventListener("click", () => {
-                localStorage.removeItem(STORAGE.template);
-                tmplInput.value = DEFAULT_DESCRIPTION;
+                resetTemplate(selectedTracker);
+                tmplInput.value = getTemplate(selectedTracker);
                 toast("Template reset to default");
             });
 
             // ---- AI assistant mode ----
-            const aiToggle   = panel.querySelector("#qa-ai-toggle");
+            const modeSwitchEl = panel.querySelector("#qa-mode-switch");
+            const modeBtns   = panel.querySelectorAll(".qa-mode-btn");
             const tmplModeEl = panel.querySelector("#qa-tmpl-mode");
             const aiModeEl   = panel.querySelector("#qa-ai-mode");
             const aiKeyRow   = panel.querySelector("#qa-ai-key");
@@ -570,6 +868,14 @@
             const aiReview   = panel.querySelector("#qa-ai-review");
             const aiSubject  = panel.querySelector("#qa-ai-subject");
             const aiDesc     = panel.querySelector("#qa-ai-desc");
+
+            // Set the initial placeholder now that #qa-ai-input exists, and keep
+            // it in sync when the Redmine form's tracker dropdown changes.
+            refreshAiPlaceholder();
+            const issueTrackerSel = document.getElementById("issue_tracker_id");
+            if (issueTrackerSel) {
+                issueTrackerSel.addEventListener("change", refreshAiPlaceholder);
+            }
 
             // Keep typing inside AI fields from triggering drag / shortcuts.
             [aiKeyInput, aiInput, aiSubject, aiDesc].forEach((el) => {
@@ -595,16 +901,34 @@
                 return b;
             }
 
+            // Loading placeholder while an AI response is in flight. Three dots
+            // pulse in sequence (see .qa-typing / @keyframes qa-dot-pulse in
+            // content.css) — the .qa-typing class is stripped when the reply
+            // arrives and normal textContent takes over.
+            function addTypingBubble() {
+                const b = document.createElement("div");
+                b.className = "qa-bubble qa-bubble-ai qa-typing";
+                b.innerHTML = '<span class="qa-dot"></span><span class="qa-dot"></span><span class="qa-dot"></span>';
+                aiChatEl.appendChild(b);
+                aiChatEl.scrollTop = aiChatEl.scrollHeight;
+                return b;
+            }
+
             function setAiMode(on) {
                 aiModeEl.hidden = !on;
                 tmplModeEl.hidden = on;
-                aiToggle.checked = on;
-                panel.querySelector(".qa-mode-switch").classList.toggle("qa-ai-on", on);
+                modeBtns.forEach((b) => b.classList.toggle("active", (b.dataset.mode === "ai") === on));
+                // Drive the sliding pill in .qa-mode-switch via a data attribute so the
+                // animation is pure CSS (see .qa-mode-switch::before in content.css).
+                if (modeSwitchEl) modeSwitchEl.dataset.active = on ? "ai" : "template";
                 localStorage.setItem(STORAGE.aiMode, on ? "1" : "0");
                 if (on) refreshKeyRow();
             }
 
-            aiToggle.addEventListener("change", () => setAiMode(aiToggle.checked));
+            modeBtns.forEach((btn) => btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                setAiMode(btn.dataset.mode === "ai");
+            }));
 
             // Model selector (persisted; falls back to the default).
             aiModelSel.value = AI.model();
@@ -632,6 +956,17 @@
                 aiKeyInput.focus();
             });
 
+            // Toggle masked / plain rendering of the key input. We use
+            // -webkit-text-security on a regular text input (see .qa-secret)
+            // instead of type="password" so browsers and password managers
+            // don't attach autofill to other inputs on the page (e.g. the
+            // Agile board's search field).
+            panel.querySelector('[data-action="ai-toggle-key"]').addEventListener("click", (e) => {
+                e.stopPropagation();
+                aiKeyInput.classList.toggle("qa-secret");
+                e.currentTarget.innerHTML = svgIcon(aiKeyInput.classList.contains("qa-secret") ? "eye" : "eye-off");
+            });
+
             async function sendToAi() {
                 const text = aiInput.value.trim();
                 if (!text) return;
@@ -641,19 +976,35 @@
                 aiHistory.push({ role: "user", content: text });
                 aiInput.value = "";
 
-                const thinking = addBubble("ai", "Thinking…");
+                const thinking = addTypingBubble();
                 const sendBtn = panel.querySelector('[data-action="ai-send"]');
                 sendBtn.disabled = true;
                 try {
                     const res = await aiChat(aiHistory);
                     aiHistory.push({ role: "assistant", content: res.raw || JSON.stringify(res) });
-                    thinking.textContent = res.reply || "Done.";
-                    if (res.subject || res.description) {
+                    thinking.classList.remove("qa-typing");
+                    const hasDraft = !!(res.subject || res.description);
+                    // When the model omitted a chat reply, tell the user WHERE
+                    // to look next instead of a bare "Done." — the review card
+                    // is often below the fold and easy to miss otherwise.
+                    thinking.textContent = res.reply || (hasDraft
+                        ? "Draft ready \u2014 review the subject and description below, then click Fill."
+                        : "Done.");
+                    if (hasDraft) {
                         aiSubject.value = res.subject || aiSubject.value;
                         aiDesc.value = res.description || aiDesc.value;
                         aiReview.hidden = false;
+                        // Pulse the review card + scroll it into view so it's
+                        // obvious that a new panel just appeared. Removing the
+                        // class then forcing a reflow (offsetWidth read)
+                        // restarts the animation on every fresh draft.
+                        aiReview.classList.remove("qa-ai-review-reveal");
+                        void aiReview.offsetWidth;
+                        aiReview.classList.add("qa-ai-review-reveal");
+                        aiReview.scrollIntoView({ behavior: "smooth", block: "nearest" });
                     }
                 } catch (err) {
+                    thinking.classList.remove("qa-typing");
                     thinking.classList.add("qa-bubble-error");
                     thinking.textContent = "⚠️ " + err.message;
                 } finally {
@@ -691,7 +1042,7 @@
         const boardsCaret  = panel.querySelector("#qa-boards-caret");
         function setBoardsOpen(open) {
             boardsWrap.hidden = !open;
-            boardsCaret.textContent = open ? "▾" : "▸";
+            boardsCaret.classList.toggle("qa-caret-open", open);
             boardsToggle.setAttribute("aria-expanded", open ? "true" : "false");
             localStorage.setItem(STORAGE.boardsOpen, open ? "1" : "0");
         }
@@ -707,7 +1058,7 @@
             const tmplCaret  = panel.querySelector("#qa-tmpl-caret");
             const setTemplateOpen = (open) => {
                 tmplWrap.hidden = !open;
-                tmplCaret.textContent = open ? "▾" : "▸";
+                tmplCaret.classList.toggle("qa-caret-open", open);
                 tmplToggle.setAttribute("aria-expanded", open ? "true" : "false");
                 localStorage.setItem(STORAGE.tmplOpen, open ? "1" : "0");
             };
@@ -739,6 +1090,7 @@
         restorePanelState(panel);
         makeDraggable(panel, document.getElementById("qa-header"));
         makeDockDraggable(panel, document.getElementById("qa-dock-face"));
+        addResizeHandles(panel);
     }
 
     //////////////////////////////////////////////////////
@@ -749,7 +1101,7 @@
         const collapsed = force !== undefined ? force : !panel.classList.contains("qa-collapsed");
         panel.classList.toggle("qa-collapsed", collapsed);
         const btn = document.getElementById("qa-collapse");
-        if (btn) btn.textContent = collapsed ? "+" : "–";
+        if (btn) btn.innerHTML = svgIcon(collapsed ? "plus" : "minus");
         localStorage.setItem(STORAGE.collapsed, collapsed ? "1" : "0");
 
         if (collapsed) {
@@ -993,8 +1345,30 @@
         panel.style.top   = "180px";
     }
 
+    // Persist the user-chosen panel size (set by dragging the resize corner).
+    // Only meaningful while expanded; collapsed/docked sizes are fixed by CSS.
+    function savePanelSize(panel) {
+        if (panel.classList.contains("qa-collapsed") || panel.classList.contains("qa-docked")) return;
+        localStorage.setItem(STORAGE.panelSize, JSON.stringify({
+            width:  panel.offsetWidth + "px",
+            height: panel.offsetHeight + "px"
+        }));
+    }
+
+    // Reapply a previously saved panel size to the expanded card.
+    function restorePanelSize(panel) {
+        try {
+            const size = JSON.parse(localStorage.getItem(STORAGE.panelSize) || "null");
+            if (size && size.width && size.height) {
+                panel.style.width  = size.width;
+                panel.style.height = size.height;
+            }
+        } catch (e) { /* ignore */ }
+    }
+
     function restorePanelState(panel) {
         restorePanelPosition(panel);
+        restorePanelSize(panel);
 
         if (localStorage.getItem(STORAGE.collapsed) === "1") {
             togglePanel(panel, true);
@@ -1002,6 +1376,88 @@
         if (localStorage.getItem(STORAGE.docked) === "1") {
             setDocked(panel, true);
         }
+    }
+
+    // Add drag handles to every edge and corner so the expanded panel can be
+    // resized from any side. Each handle adjusts width/height (and left/top for
+    // the west/north sides) within the min/max bounds.
+    function addResizeHandles(panel) {
+        const dirs = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+        dirs.forEach((dir) => {
+            const h = document.createElement("div");
+            h.className = "qa-rz qa-rz-" + dir;
+            panel.appendChild(h);
+            makeResizable(panel, h, dir);
+        });
+    }
+
+    function makeResizable(panel, handle, dir) {
+        const MIN_W = 260, MIN_H = 180;
+
+        handle.addEventListener("mousedown", (e) => {
+            // Don't resize while collapsed or docked.
+            if (panel.classList.contains("qa-collapsed") || panel.classList.contains("qa-docked")) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const startX = e.clientX, startY = e.clientY;
+            const rect = panel.getBoundingClientRect();
+            const startW = rect.width,  startH = rect.height;
+            const startLeft = rect.left, startTop = rect.top;
+            const rightEdge = rect.left + rect.width;
+            const bottomEdge = rect.top + rect.height;
+            const vw = document.documentElement.clientWidth;
+            const vh = document.documentElement.clientHeight;
+            const maxW = Math.round(vw * 0.96);
+            const maxH = Math.round(vh * 0.96);
+            const clamp = (v, min, max) => Math.max(min, Math.min(v, max));
+
+            // Lock to left/top positioning so west/north edges can move the panel.
+            panel.style.left  = startLeft + "px";
+            panel.style.top   = startTop + "px";
+            panel.style.right = "auto";
+            panel.classList.add("qa-resizing");
+
+            function onMove(ev) {
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                let w = startW, h = startH, left = startLeft, top = startTop;
+
+                if (dir.indexOf("e") !== -1) {
+                    w = clamp(startW + dx, MIN_W, Math.min(maxW, vw - startLeft));
+                }
+                if (dir.indexOf("w") !== -1) {
+                    w = clamp(startW - dx, MIN_W, Math.min(maxW, rightEdge));
+                    left = rightEdge - w;
+                }
+                if (dir.indexOf("s") !== -1) {
+                    h = clamp(startH + dy, MIN_H, Math.min(maxH, vh - startTop));
+                }
+                if (dir.indexOf("n") !== -1) {
+                    h = clamp(startH - dy, MIN_H, Math.min(maxH, bottomEdge));
+                    top = bottomEdge - h;
+                }
+
+                panel.style.width  = w + "px";
+                panel.style.height = h + "px";
+                panel.style.left   = left + "px";
+                panel.style.top    = top + "px";
+            }
+
+            function onUp() {
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                panel.classList.remove("qa-resizing");
+                savePanelSize(panel);
+                localStorage.setItem(STORAGE.panelPos, JSON.stringify({
+                    left: panel.style.left,
+                    top:  panel.style.top
+                }));
+            }
+
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+        });
     }
 
     //////////////////////////////////////////////////////
@@ -1095,9 +1551,32 @@
 
     let qaInitialized = false;
 
+    // Load Inter from Google Fonts so the modern typography actually renders on
+    // machines where Inter (or Segoe UI Variable / SF Pro) is not installed.
+    // Fails silently if the page's CSP blocks fonts.googleapis.com \u2014 the CSS
+    // font stack then falls back to the OS default.
+    function loadModernFont() {
+        if (document.getElementById("qa-font-link")) return;
+        const preconnect1 = document.createElement("link");
+        preconnect1.rel = "preconnect";
+        preconnect1.href = "https://fonts.googleapis.com";
+        const preconnect2 = document.createElement("link");
+        preconnect2.rel = "preconnect";
+        preconnect2.href = "https://fonts.gstatic.com";
+        preconnect2.crossOrigin = "anonymous";
+        const link = document.createElement("link");
+        link.id = "qa-font-link";
+        link.rel = "stylesheet";
+        link.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap";
+        (document.head || document.documentElement).appendChild(preconnect1);
+        (document.head || document.documentElement).appendChild(preconnect2);
+        (document.head || document.documentElement).appendChild(link);
+    }
+
     function init() {
         if (qaInitialized) return;
         qaInitialized = true;
+        loadModernFont();
         createPanel();
         initShortcuts();
         consumeProjectHash();
