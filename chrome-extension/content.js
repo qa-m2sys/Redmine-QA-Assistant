@@ -21,10 +21,10 @@
     // (which caused a stuck "Loading..." spinner). "path" is the base new-issue
     // URL; the selected tracker id is appended per navigation.
     const PROJECTS = {
-        web:     { label: "🌐 Web",     path: "/projects/web-app-version-2/issues/new", board: "/projects/web-app-version-2/agile/board", version: "2216", assignee: "CloudApper Web Team" },
-        backend: { label: "⚙️ Backend", path: "/projects/backend/issues/new",           board: "/projects/backend/agile/board",           version: "2215", assignee: "CloudApper Backend Team" },
-        ios:     { label: "🍎 iOS",     path: "/projects/ios-app/issues/new",           board: "/projects/ios-app/agile/board",           version: "2163", assignee: "CloudApper iOS Team" },
-        android: { label: "🤖 Android", path: "/projects/android-app/issues/new",       board: "/projects/android-app/agile/board",       version: "2206", assignee: "CloudApper Android Team" }
+        web:     { label: "Web",     icon: "globe",      path: "/projects/web-app-version-2/issues/new", board: "/projects/web-app-version-2/agile/board", version: "2216", assignee: "CloudApper Web Team" },
+        backend: { label: "Backend", icon: "server",     path: "/projects/backend/issues/new",           board: "/projects/backend/agile/board",           version: "2215", assignee: "CloudApper Backend Team" },
+        ios:     { label: "iOS",     icon: "smartphone", path: "/projects/ios-app/issues/new",           board: "/projects/ios-app/agile/board",           version: "2163", assignee: "CloudApper iOS Team" },
+        android: { label: "Android", icon: "android",    path: "/projects/android-app/issues/new",       board: "/projects/android-app/agile/board",       version: "2206", assignee: "CloudApper Android Team" }
     };
 
     // Order in which project buttons are rendered, and their keyboard shortcut digit.
@@ -33,12 +33,12 @@
     // Redmine trackers the user can report under. The numeric ids match this
     // Redmine instance; TRACKER_ORDER controls the grid order.
     const TRACKERS = {
-        bug:        { id: "1", name: "Bug",        emoji: "🐞" },
-        feature:    { id: "2", name: "Feature",    emoji: "✨" },
-        task:       { id: "5", name: "Task",       emoji: "✅" },
-        userstory:  { id: "6", name: "User story", emoji: "📖" },
-        testcase:   { id: "7", name: "Test case",  emoji: "🧪" },
-        suggestion: { id: "4", name: "Suggestion", emoji: "💡" }
+        bug:        { id: "1", name: "Bug",        icon: "bug" },
+        feature:    { id: "2", name: "Feature",    icon: "star" },
+        task:       { id: "5", name: "Task",       icon: "check-square" },
+        userstory:  { id: "6", name: "User story", icon: "user" },
+        testcase:   { id: "7", name: "Test case",  icon: "flask" },
+        suggestion: { id: "4", name: "Suggestion", icon: "lightbulb" }
     };
     const TRACKER_ORDER = ["bug", "feature", "task", "userstory", "testcase", "suggestion"];
     const DEFAULT_TRACKER = "bug";
@@ -164,7 +164,6 @@ As a <role>, I want <goal> so that <benefit>.
         docked:    "qa-panel-docked",
         dockPos:   "qa-panel-dock-pos",
         template:  "qa-template",
-        tmplOpen:  "qa-template-open",
         boardsOpen:"qa-boards-open",
         lastBoard: "qa-last-board",
         theme:     "qa-theme",
@@ -181,16 +180,67 @@ As a <role>, I want <goal> so that <benefit>.
     // shapes are stroke-only and inherit currentColor via CSS (see .qa-hbtn svg
     // / .qa-caret svg in content.css), so they follow theme/hover colours
     // automatically.
-    const QA_ICONS = {
-        moon:            '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
-        sun:             '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v1M12 20v1M3 12h1M20 12h1M5.6 5.6l.7.7M17.7 17.7l.7.7M5.6 18.4l.7-.7M17.7 6.3l.7-.7"/></svg>',
-        pin:             '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
-        minus:           '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14"/></svg>',
-        plus:            '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
-        "chevron-right": '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
-        eye:             '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
-        "eye-off":       '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.5 19.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19M1 1l22 22M9.88 9.88a3 3 0 1 0 4.24 4.24"/></svg>'
-    };
+    // Inline SVG icon set. Each entry is a self-contained <svg> string so the
+    // render code can drop it straight into innerHTML. All shapes are
+    // stroke-only, use currentColor, and bake stroke + linecap attributes into
+    // the <svg> element so they work in every context (header buttons, tracker
+    // cards, template action row, chat bubbles) without extra CSS. Shapes are
+    // adapted from Lucide (MIT-licensed) with minor simplifications so they
+    // read well at 13–15 px.
+    const QA_ICONS = (() => {
+        const A = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+        return {
+            // Chrome / header
+            moon:            `<svg ${A}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
+            sun:             `<svg ${A}><circle cx="12" cy="12" r="4"/><path d="M12 3v1M12 20v1M3 12h1M20 12h1M5.6 5.6l.7.7M17.7 17.7l.7.7M5.6 18.4l.7-.7M17.7 6.3l.7-.7"/></svg>`,
+            pin:             `<svg ${A}><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>`,
+            minus:           `<svg ${A}><path d="M5 12h14"/></svg>`,
+            plus:            `<svg ${A}><path d="M12 5v14M5 12h14"/></svg>`,
+            "chevron-right": `<svg ${A}><path d="M9 6l6 6-6 6"/></svg>`,
+            eye:             `<svg ${A}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`,
+            "eye-off":       `<svg ${A}><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.5 19.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19M1 1l22 22M9.88 9.88a3 3 0 1 0 4.24 4.24"/></svg>`,
+            rocket:          `<svg ${A}><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>`,
+
+            // Description-source mode toggle. `bot` reads as an AI-assistant
+            // (Copilot-style) rounded robot head with a top antenna, two eye
+            // dots, and side "ear" antennae — a widely recognised AI glyph
+            // that pairs well with the file-text icon used for Template mode.
+            sparkle:         `<svg ${A}><path d="M12 3l1.9 4.2L18 9l-4.1 1.8L12 15l-1.9-4.2L6 9l4.1-1.8L12 3z"/></svg>`,
+            bot:             `<svg ${A}><path d="M12 2v3"/><rect x="4" y="7" width="16" height="12" rx="3"/><circle cx="9" cy="13" r="1.1"/><circle cx="15" cy="13" r="1.1"/><path d="M2 13v2"/><path d="M22 13v2"/></svg>`,
+            "file-text":     `<svg ${A}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6"/><path d="M9 17h6"/><path d="M9 9h2"/></svg>`,
+
+            // Template action row + AI panel
+            save:                 `<svg ${A}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>`,
+            "rotate-ccw":         `<svg ${A}><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>`,
+            download:             `<svg ${A}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>`,
+            copy:                 `<svg ${A}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+            "trash-2":            `<svg ${A}><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
+            key:                  `<svg ${A}><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.5 12.5L21 2"/><path d="M17 6l3 3"/></svg>`,
+            sparkles:             `<svg ${A}><path d="M12 3l1.9 4.2L18 9l-4.1 1.8L12 15l-1.9-4.2L6 9l4.1-1.8L12 3z"/><path d="M19 15l.7 1.5L21 17l-1.3.5L19 19l-.7-1.5L17 17l1.3-.5L19 15z"/><path d="M5 15l.7 1.5L7 17l-1.3.5L5 19l-.7-1.5L3 17l1.3-.5L5 15z"/></svg>`,
+            eraser:               `<svg ${A}><path d="M20 21H7"/><path d="M5 11l9 9"/><path d="M18.4 8.4L14 4a1.4 1.4 0 0 0-2 0L4 12a1.4 1.4 0 0 0 0 2l4.6 4.6a1.4 1.4 0 0 0 2 0L18.4 12a1.4 1.4 0 0 0 0-2z"/></svg>`,
+            "arrow-down-to-line": `<svg ${A}><path d="M12 3v13"/><path d="M6 10l6 6 6-6"/><path d="M21 20H3"/></svg>`,
+            "alert-triangle":     `<svg ${A}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+
+            // Tracker cards
+            // Bug is redrawn (vs. the original Lucide bug) so the visible
+            // body + legs sit at the geometric centre of the 24×24 viewBox
+            // instead of hugging the bottom half. This makes it centre
+            // vertically inside a flex row without a fudge-margin: antennae
+            // reach up to y=4, legs stop at y=17, body centre ≈ y=12.
+            bug:                  `<svg ${A}><path d="M9 5l1.5 2"/><path d="M15 5l-1.5 2"/><rect x="7" y="7" width="10" height="11" rx="5"/><path d="M12 8v9"/><path d="M7 11H4"/><path d="M7 14H4"/><path d="M6 17l1-1"/><path d="M17 11h3"/><path d="M17 14h3"/><path d="M18 17l-1-1"/></svg>`,
+            star:                 `<svg ${A}><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`,
+            "check-square":       `<svg ${A}><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`,
+            user:                 `<svg ${A}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+            flask:                `<svg ${A}><path d="M10 2v7.5L2.4 21.16A1 1 0 0 0 3.24 22.5h17.52a1 1 0 0 0 .84-1.34L14 9.5V2"/><path d="M8.5 2h7"/><path d="M6.5 15h11"/></svg>`,
+            lightbulb:            `<svg ${A}><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14A5.5 5.5 0 0 0 12 4a5.5 5.5 0 0 0-3.09 10c1.19.86 1.09 1.72 1.09 4h4c0-2.28-.1-3.14 1.09-4z"/></svg>`,
+
+            // Project / board cards
+            globe:                `<svg ${A}><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
+            server:               `<svg ${A}><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>`,
+            smartphone:           `<svg ${A}><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
+            android:              `<svg ${A}><path d="M17.5 15.5a5.5 5.5 0 1 0-11 0z"/><path d="M6.5 15.5v3.5"/><path d="M17.5 15.5v3.5"/><line x1="9" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="15" y2="12"/><path d="M7 9L5 6"/><path d="M17 9l2-3"/></svg>`
+        };
+    })();
     const svgIcon = (name) => QA_ICONS[name] || "";
 
     // Default OpenAI model for the AI bug-report assistant.
@@ -615,86 +665,72 @@ As a <role>, I want <goal> so that <benefit>.
         const panel = document.createElement("div");
         panel.id = "qa-panel";
 
-        // The Actions and Description Template sections only make sense on Redmine
-        // (they act on the issue form). On the app under test they are hidden.
+        // The Description Source section (with Fill / Copy / Clear + template
+        // editor + AI) only makes sense on Redmine — it acts on the issue form.
+        // On the app under test the panel is a launcher only.
         const onRedmine = location.origin === REDMINE;
 
         // Launcher hosts (dev.cloudapper.com etc.) show a shorter body \u2014 no
-        // Actions and no Description Source sections. Tag the panel so CSS can
-        // raise the expanded min-height enough to keep the version footer
-        // visible without scrolling.
+        // Description Source section. Tag the panel so CSS can raise the
+        // expanded min-height enough to keep the version footer visible
+        // without scrolling.
         if (!onRedmine) panel.classList.add("qa-launcher");
 
         const projectButtons = PROJECT_ORDER.map((key) => {
             const p = PROJECTS[key];
-            // Labels look like "🌐 Web" — split emoji from name so it renders
-            // like a tracker card (emoji chip + name).
-            const firstSpace = p.label.indexOf(" ");
-            const emoji = firstSpace > 0 ? p.label.slice(0, firstSpace) : "";
-            const name  = firstSpace > 0 ? p.label.slice(firstSpace + 1) : p.label;
+            // Icon (from QA_ICONS) sits in the same slot as the old emoji.
             return `<a class="qa-project-card qa-project-btn" data-project="${key}"
                         href="${newIssueUrl(key, TRACKERS[DEFAULT_TRACKER].id)}" target="_blank" rel="noopener">
-                        <span class="qa-project-emoji">${emoji}</span><span>${name}</span>
+                        <span class="qa-project-emoji">${svgIcon(p.icon)}</span><span>${p.label}</span>
                     </a>`;
         }).join("");
 
         const trackerCards = TRACKER_ORDER.map((key) => {
             const t = TRACKERS[key];
             return `<button class="qa-tracker-card" data-tracker="${key}" type="button">
-                        <span class="qa-tracker-emoji">${t.emoji}</span><span>${t.name}</span>
+                        <span class="qa-tracker-emoji">${svgIcon(t.icon)}</span><span>${t.name}</span>
                     </button>`;
         }).join("");
 
         const boardButtons = PROJECT_ORDER.map((key, i) => {
             const p = PROJECTS[key];
-            const name = p.label.replace(/^\S+\s+/, ""); // label without the emoji
             const href = toRedmineAbs(getLastBoards()[key] || boardUrl(key));
+            // Split the label into two spans so the row layout on Redmine can
+            // drop the trailing " Board" word (via CSS) while the launcher keeps
+            // the full "Web Board" text in its stacked layout.
             return `<a class="qa-btn qa-board-btn" data-board="${key}"
                         href="${href}" target="_blank" rel="noopener"
-                        title="${name} agile board" aria-label="${name} agile board">
-                        <span>${p.label} Board</span><kbd>⇧${i + 1}</kbd>
+                        title="${p.label} agile board" aria-label="${p.label} agile board">
+                        <span class="qa-board-label"><span class="qa-board-emoji">${svgIcon(p.icon)}</span><span class="qa-board-name">${p.label}</span><span class="qa-board-suffix"> Board</span></span><kbd>⇧${i + 1}</kbd>
                     </a>`;
         }).join("");
 
-        const actionsHtml = onRedmine ? `
-                <div class="qa-divider"></div>
-                <div class="qa-section-label">Actions</div>
-                <button class="qa-btn qa-action" data-action="fill">
-                    <span>✍️ Fill Template</span><kbd>F</kbd>
-                </button>
-                <button class="qa-btn qa-action" data-action="copy">
-                    <span>📋 Copy Description</span><kbd>C</kbd>
-                </button>
-                <button class="qa-btn qa-action qa-danger" data-action="clear">
-                    <span>🧹 Clear Form</span><kbd>X</kbd>
-                </button>` : "";
-
         const templateHtml = onRedmine ? `
                 <div class="qa-divider"></div>
-                <button class="qa-section-toggle" id="qa-tmpl-toggle" type="button" aria-expanded="false">
-                    <span>Step 3 · Description source</span>
-                    <span class="qa-caret" id="qa-tmpl-caret">${svgIcon("chevron-right")}</span>
-                </button>
-                <div class="qa-tmpl-wrap" id="qa-tmpl-wrap" hidden>
-                    <div class="qa-mode-switch" id="qa-mode-switch" role="tablist" aria-label="Description source">
-                        <button type="button" class="qa-mode-btn active" data-mode="template">📝 Template</button>
-                        <button type="button" class="qa-mode-btn" data-mode="ai">🤖 AI</button>
+                <div class="qa-section-label">Step 3 · Description source</div>
+                <div class="qa-tmpl-wrap" id="qa-tmpl-wrap">
+                    <div class="qa-mode-switch" id="qa-mode-switch" role="tablist" aria-label="Description source" data-active="ai">
+                        <button type="button" class="qa-mode-btn active" data-mode="ai"><span class="qa-mode-icon">${svgIcon("bot")}</span>AI</button>
+                        <button type="button" class="qa-mode-btn" data-mode="template"><span class="qa-mode-icon">${svgIcon("file-text")}</span>Template</button>
                     </div>
 
-                    <div id="qa-tmpl-mode">
+                    <div id="qa-tmpl-mode" hidden>
                         <textarea id="qa-template-input" class="qa-template-input"
                                   spellcheck="false"
                                   placeholder="Type your description template here…"></textarea>
                         <div class="qa-template-actions">
-                            <button class="qa-btn qa-tmpl-btn" data-action="save-template">💾 Save</button>
-                            <button class="qa-btn qa-tmpl-btn" data-action="reset-template">↺ Reset</button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="save-template" title="Save template"><span class="qa-btn-icon">${svgIcon("save")}</span><span class="qa-btn-label">Save</span></button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="reset-template" title="Reset to default template"><span class="qa-btn-icon">${svgIcon("rotate-ccw")}</span><span class="qa-btn-label">Reset</span></button>
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="fill" title="Fill the issue form (Alt+F)"><span class="qa-btn-icon">${svgIcon("download")}</span><span class="qa-btn-label">Fill</span></button>
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="copy" title="Copy this template to clipboard (Alt+C)"><span class="qa-btn-icon">${svgIcon("copy")}</span><span class="qa-btn-label">Copy</span></button>
+                            <button class="qa-btn qa-tmpl-btn qa-action qa-danger" data-action="clear" title="Clear the issue form (Alt+X)"><span class="qa-btn-icon">${svgIcon("trash-2")}</span><span class="qa-btn-label">Clear</span></button>
                         </div>
                     </div>
 
-                    <div id="qa-ai-mode" hidden>
+                    <div id="qa-ai-mode">
                         <div class="qa-ai-key" id="qa-ai-key">
                             <div class="qa-ai-key-saved" id="qa-ai-key-saved" hidden>
-                                <span class="qa-ai-key-status">🔑 API key saved</span>
+                                <span class="qa-ai-key-status"><span class="qa-btn-icon">${svgIcon("key")}</span> API key saved</span>
                                 <button class="qa-btn qa-tmpl-btn" data-action="ai-change-key">Change</button>
                             </div>
                             <div class="qa-ai-key-edit" id="qa-ai-key-edit">
@@ -704,7 +740,7 @@ As a <role>, I want <goal> so that <benefit>.
                                        data-lpignore="true" data-1p-ignore data-form-type="other">
                                 <button class="qa-btn qa-tmpl-btn qa-icon-btn" type="button"
                                         data-action="ai-toggle-key" title="Show / hide key">${svgIcon("eye")}</button>
-                                <button class="qa-btn qa-tmpl-btn" data-action="ai-save-key">🔑 Save</button>
+                                <button class="qa-btn qa-tmpl-btn" data-action="ai-save-key"><span class="qa-btn-icon">${svgIcon("key")}</span>Save</button>
                             </div>
                         </div>
                         <label class="qa-ai-model-row">
@@ -718,21 +754,21 @@ As a <role>, I want <goal> so that <benefit>.
                                   rows="3" spellcheck="false"
                                   placeholder="Describe the bug in rough words… (Ctrl+Enter to send)"></textarea>
                         <div class="qa-template-actions">
-                            <button class="qa-btn qa-tmpl-btn" data-action="ai-send">✨ Structure</button>
-                            <button class="qa-btn qa-tmpl-btn" data-action="ai-clear">🧹 Reset Chat</button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="ai-send"><span class="qa-btn-icon">${svgIcon("sparkles")}</span>Structure</button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="ai-clear"><span class="qa-btn-icon">${svgIcon("eraser")}</span>Reset Chat</button>
                         </div>
                         <div class="qa-ai-review" id="qa-ai-review" hidden>
                             <div class="qa-section-label">Review &amp; edit before filling</div>
                             <input type="text" id="qa-ai-subject" class="qa-ai-field" placeholder="Subject">
                             <textarea id="qa-ai-desc" class="qa-template-input" spellcheck="false" placeholder="Description"></textarea>
-                            <button class="qa-btn qa-tmpl-btn qa-ai-fill" data-action="ai-fill">⬇️ Fill Subject &amp; Description</button>
+                            <button class="qa-btn qa-tmpl-btn qa-ai-fill" data-action="ai-fill"><span class="qa-btn-icon">${svgIcon("arrow-down-to-line")}</span>Fill Subject &amp; Description</button>
                         </div>
                     </div>
                 </div>` : "";
 
         panel.innerHTML = `
             <div class="qa-header" id="qa-header">
-                <span class="qa-title">🚀 QA Assistant</span>
+                <span class="qa-title"><span class="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
                 <div class="qa-header-btns">
                     <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">${svgIcon("moon")}</button>
                     <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">${svgIcon("pin")}</button>
@@ -751,14 +787,10 @@ As a <role>, I want <goal> so that <benefit>.
                 <div class="qa-project-grid" id="qa-project-list" hidden>${projectButtons}</div>
                 ${templateHtml}
                 <div class="qa-divider"></div>
-                <button class="qa-section-toggle" id="qa-boards-toggle" type="button" aria-expanded="false">
-                    <span>Agile Boards</span>
-                    <span class="qa-caret" id="qa-boards-caret">${svgIcon("chevron-right")}</span>
-                </button>
-                <div class="qa-tmpl-wrap" id="qa-boards-wrap" hidden>
+                <div class="qa-section-label">Agile Boards</div>
+                <div class="qa-boards-row" id="qa-boards-wrap">
                     ${boardButtons}
                 </div>
-                ${actionsHtml}
                 <div class="qa-version">${QA_VERSION ? "v" + QA_VERSION : ""}</div>
             </div>
         `;
@@ -797,7 +829,12 @@ As a <role>, I want <goal> so that <benefit>.
             localStorage.setItem(STORAGE.lastTracker, key);
             trackerGrid.querySelectorAll(".qa-tracker-card").forEach(c =>
                 c.classList.toggle("active", c.dataset.tracker === key));
-            reportFor.textContent = t.emoji + " " + t.name;
+            // reportFor renders as an inline SVG icon + name (was emoji + name).
+            // Wrap the tracker name in its own span so the flex row's
+            // ellipsis + max-width apply cleanly, and drop the raw space
+            // between the icon and the name (gap:6px on .qa-report-for
+            // handles the spacing).
+            reportFor.innerHTML = `<span class="qa-tracker-emoji">${svgIcon(t.icon)}</span><span class="qa-report-for-name">${t.name}</span>`;
             projectStep.hidden = false;
             projectList.hidden = false;
             projectLinks.forEach(a => { a.href = newIssueUrl(a.dataset.project, t.id); });
@@ -1006,7 +1043,10 @@ As a <role>, I want <goal> so that <benefit>.
                 } catch (err) {
                     thinking.classList.remove("qa-typing");
                     thinking.classList.add("qa-bubble-error");
-                    thinking.textContent = "⚠️ " + err.message;
+                    // Render the SVG icon safely + append the raw message as a
+                    // text node so err.message is never treated as HTML.
+                    thinking.innerHTML = `<span class="qa-btn-icon">${svgIcon("alert-triangle")}</span> `;
+                    thinking.appendChild(document.createTextNode(err.message));
                 } finally {
                     sendBtn.disabled = false;
                 }
@@ -1033,40 +1073,19 @@ As a <role>, I want <goal> so that <benefit>.
                 fillIssueFields(aiSubject.value, aiDesc.value);
             });
 
-            setAiMode(localStorage.getItem(STORAGE.aiMode) === "1");
+            // Default to AI mode when nothing has been saved yet — users
+            // typically want the assistant first, and can flip to Template.
+            setAiMode(localStorage.getItem(STORAGE.aiMode) !== "0");
         }
 
-        // Agile Boards collapse (hidden until user expands)
-        const boardsToggle = panel.querySelector("#qa-boards-toggle");
-        const boardsWrap   = panel.querySelector("#qa-boards-wrap");
-        const boardsCaret  = panel.querySelector("#qa-boards-caret");
-        function setBoardsOpen(open) {
-            boardsWrap.hidden = !open;
-            boardsCaret.classList.toggle("qa-caret-open", open);
-            boardsToggle.setAttribute("aria-expanded", open ? "true" : "false");
-            localStorage.setItem(STORAGE.boardsOpen, open ? "1" : "0");
-        }
-        boardsToggle.addEventListener("click", () => {
-            setBoardsOpen(boardsWrap.hidden);
-        });
-        setBoardsOpen(localStorage.getItem(STORAGE.boardsOpen) === "1");
+        // Agile Boards render inline now — no collapse toggle. Board links
+        // still refresh their href on mousedown so they open the last-viewed
+        // board (or the current sprint) for that project.
 
-        // Description Template collapse only exists on Redmine.
-        if (onRedmine) {
-            const tmplToggle = panel.querySelector("#qa-tmpl-toggle");
-            const tmplWrap   = panel.querySelector("#qa-tmpl-wrap");
-            const tmplCaret  = panel.querySelector("#qa-tmpl-caret");
-            const setTemplateOpen = (open) => {
-                tmplWrap.hidden = !open;
-                tmplCaret.classList.toggle("qa-caret-open", open);
-                tmplToggle.setAttribute("aria-expanded", open ? "true" : "false");
-                localStorage.setItem(STORAGE.tmplOpen, open ? "1" : "0");
-            };
-            tmplToggle.addEventListener("click", () => {
-                setTemplateOpen(tmplWrap.hidden);
-            });
-            setTemplateOpen(localStorage.getItem(STORAGE.tmplOpen) === "1");
-        }
+        // Description Source is always open on Redmine (no collapse toggle).
+        // The section header is a plain .qa-section-label to match the other
+        // step headers, and the wrap has no `hidden` attribute so it renders
+        // immediately with the mode switch + active pane visible.
 
         // Collapse toggle
         document.getElementById("qa-collapse").addEventListener("click", (e) => {

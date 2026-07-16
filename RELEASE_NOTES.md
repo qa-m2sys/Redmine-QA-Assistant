@@ -5,7 +5,275 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 5.31 — current
+## Version 5.43 — current
+
+### Redmine panel opens tall enough to show everything
+- 📏 **`#qa-panel:not(.qa-launcher)` (Redmine expanded state) now has
+  `min-height: 680px`.** Matches the same pattern used for the launcher
+  (`min-height: 440px`) so the panel opens tall enough to show every
+  section — tracker grid, project grid, agile boards row, description
+  source (mode switch + AI/Template pane), and the version footer at
+  the bottom — without any scrolling on first paint.
+- ↕️ **Users can still resize taller** via the corner/edge handles; the
+  680 px floor is a *minimum*, not a fixed height. `.qa-collapsed` and
+  `.qa-docked` continue to override `min-height: 0 !important`, so the
+  collapsed pill and docked strip keep their exact fixed dimensions.
+- 📱 Capped by the existing `max-height: 96vh` on the base panel rule so
+  the 680 px minimum shrinks to fit on shorter viewports (Chromebooks,
+  smaller laptops, half-screen browser windows).
+
+---
+
+## Version 5.42
+
+### Section headers levelled up
+- 📑 **`.qa-section-label` promoted from caption\-weight to proper
+  section\-break weight.** Font size 10 → 11 px, colour bumped from
+  `--qa-muted` to `--qa-text`, letter\-spacing 0.6 → 0.9 px so the
+  uppercase caps have room to breathe. Previously these headers
+  ("Report an Issue", "Agile Boards", "Step 3 · Description source",
+  "Review & edit before filling") read like faint labels; now they
+  clearly separate the panel into distinct sections.
+- 📊 **Accent bar upgraded.** The brand accent stripe next to every
+  section header went from 3 × 12 px flat brand colour to 4 × 14 px
+  with a subtle brand → brand-strong vertical gradient, giving each
+  section title a stronger anchor point on the left edge.
+- 📏 **Extra top margin between sections** (4 → 12 px) so consecutive
+  sections don't visually blur into one another. A `:first-child`
+  override keeps the very first section tucked up against the panel
+  header without a redundant gap.
+- 🧩 Substep labels (`.qa-report-substep` — the "Step 1 · choose a
+  tracker" / "Step 2 · choose a project" lines nested inside *Report
+  an Issue*) intentionally kept smaller and muted, so the two levels
+  of hierarchy (section vs. substep) read cleanly.
+
+---
+
+## Version 5.41
+
+### "Report an Issue" tracker chip alignment
+- 📏 **`.qa-report-for` promoted from plain inline text to
+  `inline-flex` + `align-items: center`.** The tracker icon inside it
+  was hanging off the text baseline instead of centring against the
+  label — same root cause as the tracker card fix in v5.39, but that
+  fix only touched the cards, not the header line above them.
+- 📌 **Wrapped the tracker name in its own `.qa-report-for-name`
+  span** so `text-overflow: ellipsis` still works when the label is
+  long (a flex child ignores the parent's overflow properties). Also
+  dropped the raw space between the icon and the name — spacing is
+  now `gap: 6px` on the flex parent.
+
+---
+
+## Version 5.40
+
+### Project cards match tracker cards
+- 🎯 **`.qa-project-card` now mirrors `.qa-tracker-card` exactly**:
+  same `padding: 9px 9px 9px 12px`, `font-size: 14px`, `line-height: 1`,
+  `gap: 8px`, and a 16×16 icon wrapper box. Previously projects used
+  12 px text + 8 px padding + 14 px icons, so the two grids looked like
+  they belonged to different UIs stacked together. They now read as
+  visually identical rows of cards.
+- 📏 **Compact Redmine board buttons keep their smaller 14 px icons.**
+  Those buttons also drop the " Board" suffix and the ⇧N chip to fit
+  four across in one row — pairing them with a 14 px icon keeps the
+  four-across layout comfortable. Split rule so `.qa-project-emoji`
+  gets 16 px while `.qa-board-emoji` stays at 14 px.
+
+---
+
+## Version 5.39
+
+### Tracker card alignment fix
+- 🐞 **Bug icon redrawn so its visible mass sits at the centre of the
+  24×24 viewBox.** The original Lucide bug had antennae stretching to
+  y=2 and legs curling all the way to y=21, so the icon's *bounding
+  box* was centred by flex but the visible bug ended up below the text
+  baseline. New version keeps antennae at y=5, body at y=7–18, legs at
+  y=11–17 — the optical centre matches the geometric centre.
+- 🔤 **Tracker card text bumped to 14 px** so the label matches the
+  16 px icon's visual weight instead of looking undersized next to it.
+- 📏 **Icon wrapper given an explicit 16×16 box.** Before, the flex
+  row was centring a text line\-box against an SVG bounding box — two
+  different height metrics, so the label sat a pixel or two low. Now
+  both flex children have identical computed heights, so
+  `align-items: center` produces a perfect line\-up.
+
+---
+
+## Version 5.38
+
+### Icon + layout polish
+- 🔤 **Tracker cards bumped to 13 px with `line\-height: 1`.** At 12 px
+  the label sat slightly below the 16 px icon's optical centre; matching
+  the icon's weight and killing the extra line\-height puts them on the
+  same baseline.
+- 🗂️ **"Step 3 · Description source" is no longer collapsible.** It's
+  now a plain section label like *Report an Issue* / *Agile Boards*, so
+  the mode switch + AI/Template pane are always visible when the panel
+  is expanded. Removed the caret toggle button, the click handler, and
+  the `qa-template-open` localStorage key.
+- 🤖 **AI button uses a Copilot\-style `bot` icon** instead of the
+  4\-point sparkle. It's the standard "AI assistant" glyph (rounded
+  robot head with antenna + side ears + eye dots) and reads better
+  paired with the Template mode's file\-text icon.
+- 🔘 **"Change" button next to *API key saved* is now a compact chip.**
+  Overrides `.qa-tmpl-btn`'s `flex: 1` so it doesn't stretch, tightens
+  padding to `5px 10px`, and adds a subtle raised shadow + hover lift
+  + active press so it visibly reads as a button.
+
+---
+
+## Version 5.37
+
+### Icon polish (follow\-up to v5.36)
+- 🚀 **Header rocket is white and stays visible when collapsed.**
+  Previously it inherited `--qa-brand`, which made it fade into the
+  brand\-tinted header bar. Now uses `--qa-on-brand` so it always reads
+  as a crisp white glyph. Also unhidden in the horizontal collapsed
+  strip — only hidden when the strip is rotated vertical (`writing\-mode`
+  would rotate the SVG otherwise).
+- 🎯 **Project card icons scaled down to 14 px** so they match the
+  12 px label text next to them (icons at 16 px looked disproportionately
+  large beside short labels like "Web" / "iOS"). Tracker cards keep
+  16 px because their busier shapes need the extra room to stay legible.
+- 📐 **Agile Boards row hides the button name when the panel is at
+  minimum width** instead of truncating it to `"We…"`. The icon
+  remains visible and the button's `title="…"` keeps the label
+  discoverable on hover. Alt+Shift+1..4 shortcuts continue to work.
+- 📏 **Vertical alignment cleanup on inline button icons.** Added
+  `line\-height: 1` + `vertical\-align: middle` on the `.qa-mode-icon`,
+  `.qa-btn-icon`, and `.qa-title-icon` wrappers so every icon sits
+  perfectly centred against its sibling text node regardless of the
+  parent's line\-height.
+
+---
+
+## Version 5.36
+
+### Visual overhaul
+- ✅ **Every panel emoji swapped for a real inline SVG icon.** Emoji
+  glyphs picked up random OS colours and never matched the panel's
+  frosted / brand-tinted look. The icon set is now a single `QA_ICONS`
+  object of stroke-based SVGs (adapted from Lucide, MIT), all using
+  `currentColor` + `stroke-width: 2` so they follow theme, hover, focus,
+  and active state colours automatically.
+- ✅ **Header** — `🚀` → outline **rocket**, tinted brand. Hidden in
+  collapsed / vertical strip states so `writing-mode: vertical-rl`
+  doesn't rotate it.
+- ✅ **Description Source toggle** — AI = **sparkle** (4\-point star,
+  signals *generative*), Template = **file\-text** (sheet with lines).
+- ✅ **Template actions row** — 💾/↺/✍️/📋/🧹 → **save** (floppy),
+  **rotate\-ccw** (undo arrow), **download** (arrow into tray, push\-into\-form),
+  **copy** (double\-rect clipboard), **trash\-2** (bin with slits). The
+  Clear button keeps its `qa-danger` red tint.
+- ✅ **AI panel** — `🔑` → **key**, `✨ Structure` → **sparkles** (three
+  stars), `🧹 Reset Chat` → **eraser** (so it's visually distinct from
+  the template **Reset**), `⬇️ Fill Subject & Description` →
+  **arrow\-down\-to\-line** (very literal push\-into\-baseline arrow),
+  `⚠️` error bubble → **alert\-triangle**.
+- ✅ **Trackers** — 🐞 Bug → **bug**, ✨ Feature → **star**, ✅ Task →
+  **check\-square**, 📖 User story → **user**, 🧪 Test case → **flask**,
+  💡 Suggestion → **lightbulb**.
+- ✅ **Projects / boards** — 🌐 Web → **globe**, ⚙️ Backend → **server**,
+  🍎 iOS → **smartphone**, 🤖 Android → the actual **Android robot**
+  silhouette (dome + antennae + eye dots).
+- 🧪 **Data shape change (safe internal refactor):** `TRACKERS[...]`
+  now carries `icon: "<key>"` instead of `emoji: "<glyph>"`, and
+  `PROJECTS[...]` gains an `icon` field with the `label` stripped down
+  to plain text (`"Web"` instead of `"🌐 Web"`). All render sites and
+  `reportFor` were updated to use `svgIcon(...)`.
+- 🎨 New CSS sizing hooks: `.qa-title-icon`, `.qa-mode-icon`,
+  `.qa-btn-icon`, `.qa-board-emoji` — all inline\-flex, 14–16 px SVGs,
+  brand\-tinted for the identity chips (tracker / project / board /
+  title) and `currentColor` for button icons so they follow state.
+
+---
+
+## Version 5.35
+
+### Improvements
+- ✅ **Board buttons on Redmine drop the ⇧N chips.** In the new one\-row
+  Agile Boards layout the shortcut badges (⇧1 / ⇧2 / ⇧3 / ⇧4) were
+  competing for space with the board name; they're now hidden via
+  `#qa-panel:not(.qa-launcher) .qa-boards-row .qa-board-btn kbd { display:none; }`.
+  Each button is just the emoji + short name, so all four fit cleanly
+  even at narrow panel widths. **Alt+Shift+1..4 still open the boards
+  — the shortcut behaviour is untouched, only the visual chip is
+  removed.** The launcher (dev.cloudapper.com, stacked layout) still
+  shows the chips.
+
+---
+
+## Version 5.34
+
+### Improvements
+- ✅ **Agile Boards always visible + one\-row layout on Redmine.** The
+  Agile Boards section no longer collapses. The ▸ toggle + caret are
+  gone — the boards render directly under a plain **Agile Boards**
+  label, so they're one click away instead of two. On Redmine the four
+  board buttons now sit **side\-by\-side in a single row** (equal share,
+  no wrapping); the redundant trailing " Board" word is dropped since
+  the section title already says it. If the panel is dragged very narrow
+  a container query ellipsizes each button's name so it degrades to
+  emoji + `⇧N` chip instead of overflowing. `Alt+Shift+1..4` shortcuts
+  are unchanged.
+- ✅ **Launcher keeps the stacked layout.** On `dev.cloudapper.com` (any
+  non\-Redmine host) the row rule is skipped via `#qa-panel:not(.qa-launcher)`,
+  so board buttons stay full\-width and stacked with the original
+  "🌐 Web Board" / "🖥️ Backend Board" wording — there's plenty of
+  vertical room on the launcher and the wider tap targets are friendlier
+  when the panel is used purely to jump into Redmine.
+
+### Cleanup
+- 🧹 Dropped the `#qa-boards-toggle` / `#qa-boards-caret` DOM and the
+  `setBoardsOpen` handler. The `qa-boards-open` localStorage key is no
+  longer written or read; existing values are harmless and can be
+  ignored (they will be overwritten if the key is ever reused).
+
+---
+
+## Version 5.33
+
+### Improvements
+- ✅ **Template actions row is adaptive.** The five buttons under
+  **Step 3 · Description source** — 💾 Save, ↺ Reset, ✍️ Fill,
+  📋 Copy, 🧹 Clear — always sit side\-by\-side in a single row now:
+  no wrapping onto a second line. Each button's text is wrapped in a
+  `.qa-btn-label` span, and the row itself uses a CSS **container query**
+  (`container-type:inline-size`) that hides the labels below ~340 px of
+  row width. So when the panel is docked or dragged narrow you see
+  icon-only chips with tooltips ("Save template", "Fill the issue form
+  (Alt+F)", etc.); when you widen the panel the labels come back
+  automatically. Every button carries a `title="…"` so the intent is
+  always discoverable via hover, and the `Alt+F` / `Alt+C` / `Alt+X`
+  shortcuts are unchanged.
+
+---
+
+## Version 5.32
+
+### Improvements
+- ✅ **Description Source consolidates all form actions.** The standalone
+  **Actions** section (Fill / Copy / Clear) is gone. Those three buttons
+  now live inside the **Step 3 · Description source** panel next to
+  **Save** / **Reset**, so the entire "draft → fill" flow — pick a
+  source, edit the draft, then Fill / Copy / Clear — sits in one row.
+  The panel is shorter and the version footer is closer to the fold.
+  `Alt+F` / `Alt+C` / `Alt+X` shortcuts are unchanged.
+- ✅ **AI is the default source.** The Template / AI segmented toggle is
+  swapped so **AI sits on the left** and is selected on first load
+  (previously Template). Users who prefer the raw template can flip it
+  once — the choice is still persisted per browser via `qa-ai-mode`.
+  The sliding pill animation and accent tinting follow the new layout.
+- ✅ **Template actions row wraps.** With five buttons in one row the
+  `.qa-template-actions` container now wraps on narrow panel widths and
+  each button grows to fill its slice, so labels stay readable when the
+  panel is docked or resized.
+
+---
+
+## Version 5.31
 
 ### Improvements
 - ✅ **AI review card announces itself.** After clicking Structure, the

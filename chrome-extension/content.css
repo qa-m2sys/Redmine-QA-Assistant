@@ -116,6 +116,17 @@
     min-height:440px;
 }
 
+/* Redmine expanded panel: taller minimum so the whole flow — tracker grid,
+   project grid, agile boards row, description source (mode switch + AI or
+   template pane) and the version footer at the bottom — is visible on
+   first paint. Users can still resize taller via the corner/edge handles;
+   they just can't drop below this without collapsing/docking the panel.
+   Capped by max-height:96vh on the base rule so it doesn't overflow small
+   viewports. Overridden to 0 by .qa-collapsed / .qa-docked below. */
+#qa-panel:not(.qa-launcher){
+    min-height:680px;
+}
+
 /* Panel entry animation. Runs once on first mount. Skipped for users who
    prefer reduced motion so it doesn't feel like an unnecessary distraction. */
 @keyframes qa-panel-in{
@@ -174,6 +185,9 @@
     box-shadow:inset 0 1px 0 rgba(255,255,255,.14);
 }
 .qa-title{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
     font-weight:600;
     letter-spacing:.2px;
 }
@@ -374,28 +388,38 @@
 }
 
 .qa-section-label{
+    /* Top-level section header ("Report an Issue", "Agile Boards",
+       "Step 3 · Description source", etc.). Bumped from 10 → 11 px,
+       muted → text colour, and wider letter-spacing so it reads clearly
+       as a *section break* instead of a light caption. Extra top margin
+       gives each section visible breathing room. */
     position:relative;
-    font-size:10px;
+    font-size:11px;
     text-transform:uppercase;
-    letter-spacing:.6px;
-    color:var(--qa-muted);
-    margin:4px 2px 6px;
-    padding-left:10px;
+    letter-spacing:.9px;
+    color:var(--qa-text);
+    margin:12px 2px 8px;
+    padding-left:12px;
     font-weight:700;
 }
+/* The very first section under the panel body doesn't need the extra top
+   margin — the panel padding already provides the gap. */
+.qa-body > .qa-section-label:first-child{ margin-top:2px; }
 
 /* Small brand-coloured accent bar to the left of every section header.
    Applied to both plain labels and collapsible toggles so all section
-   titles share the same visual anchor. */
+   titles share the same visual anchor. Bumped to 4 × 14 px with a subtle
+   brand gradient so it reads as a proper section marker instead of a
+   thin decorative line. */
 .qa-section-label::before,
 .qa-section-toggle::before{
     content:"";
     position:absolute;
     left:0;
     top:50%;
-    width:3px;
-    height:12px;
-    background:var(--qa-brand);
+    width:4px;
+    height:14px;
+    background:linear-gradient(180deg, var(--qa-brand), var(--qa-brand-strong, var(--qa-brand)));
     border-radius:2px;
     transform:translateY(-50%);
 }
@@ -424,8 +448,16 @@
     text-overflow:ellipsis;
 }
 .qa-report-for{
+    /* inline-flex + align-items:center so the .qa-tracker-emoji chip (a
+       16×16 inline-flex box) centres against the label text instead of
+       hanging off its baseline. gap:6px replaces the raw text space that
+       used to sit between the icon and the tracker name. */
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
     flex:0 0 auto;
     max-width:60%;
+    min-width:0;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
@@ -433,6 +465,14 @@
     letter-spacing:normal;
     color:var(--qa-brand);
     font-weight:600;
+}
+/* Ellipsis needs to apply to the text-holding child, not the flex parent,
+   because a flex child ignores the parent's text-overflow. */
+.qa-report-for-name{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
 }
 .qa-tracker-grid{
     display:grid;
@@ -443,15 +483,16 @@
 .qa-tracker-card{
     display:flex;
     align-items:center;
-    gap:7px;
-    padding:8px 9px 8px 12px;
+    gap:8px;
+    padding:9px 9px 9px 12px;
     border:1px solid var(--qa-border);
     border-radius:var(--qa-r-md);
     background:var(--qa-surface-2);
     color:var(--qa-text);
     cursor:pointer;
     font-family:inherit;
-    font-size:12px;
+    font-size:14px;
+    line-height:1;
     text-align:left;
     transition:background .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease;
 }
@@ -466,7 +507,22 @@
     font-weight:600;
     box-shadow:inset 3px 0 0 var(--qa-brand);
 }
-.qa-tracker-emoji{ font-size:14px; line-height:1; flex-shrink:0; }
+.qa-tracker-emoji{
+    /* Explicit 16×16 box so the flex row centres two equally-sized children
+       (icon wrapper + text label) instead of centring a text line-box
+       against an SVG bounding box. Prevents the subtle vertical offset
+       where the text baseline sits slightly below the icon's optical
+       centre. */
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:16px;
+    height:16px;
+    line-height:1;
+    flex-shrink:0;
+    color:var(--qa-brand);
+}
+.qa-tracker-emoji svg{ width:16px; height:16px; display:block; }
 
 .qa-project-grid{
     display:grid;
@@ -476,17 +532,20 @@
 }
 .qa-project-grid[hidden]{ display:none; }
 .qa-project-card{
+    /* Mirrors .qa-tracker-card metrics so the two grids look like siblings:
+       same padding, font-size, line-height, gap and icon box. */
     display:flex;
     align-items:center;
-    gap:7px;
-    padding:8px 9px;
+    gap:8px;
+    padding:9px 9px 9px 12px;
     border:1px solid var(--qa-border);
     border-radius:var(--qa-r-md);
     background:var(--qa-surface-2);
     color:var(--qa-text);
     cursor:pointer;
     font-family:inherit;
-    font-size:12px;
+    font-size:14px;
+    line-height:1;
     text-align:left;
     text-decoration:none;
     transition:background .15s ease,border-color .15s ease,color .15s ease;
@@ -497,7 +556,73 @@
 .qa-project-card:active,
 .qa-project-card:visited{ text-decoration:none; }
 .qa-project-card:hover{ border-color:var(--qa-brand); background:var(--qa-brand-tint); }
-.qa-project-emoji{ font-size:14px; line-height:1; flex-shrink:0; }
+.qa-project-emoji,
+.qa-board-emoji{
+    /* Explicit 16×16 box mirrors .qa-tracker-emoji so the flex row centres
+       two equally-sized children (icon wrapper + text label). */
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:16px;
+    height:16px;
+    line-height:1;
+    flex-shrink:0;
+    color:var(--qa-brand);
+}
+/* Project cards use the full 16px icon to match tracker cards. The compact
+   Redmine board row keeps a smaller 14px icon since it also drops the
+   " Board" suffix and ⇧N chip to fit four buttons in one line. */
+.qa-project-emoji svg{ width:16px; height:16px; display:block; }
+.qa-board-emoji{ width:14px; height:14px; }
+.qa-board-emoji svg{ width:14px; height:14px; display:block; }
+
+/* Board button label wrapper (used in both stacked launcher layout and the
+   Redmine row layout). Keeps the icon + name + suffix on one line with a
+   consistent gap; row-mode adds ellipsis + tighter spacing further down. */
+.qa-board-label{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+}
+
+/* Icon wrappers used by inline buttons (mode toggle, template action row,
+   AI panel buttons, error bubbles). Sizes the SVG and lets it inherit the
+   button's text colour so hover / focus states just work. line-height:1 on
+   the wrapper keeps the icon vertically centred against its sibling text
+   node regardless of the parent's line-height. */
+.qa-mode-icon,
+.qa-btn-icon,
+.qa-title-icon{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    flex-shrink:0;
+    line-height:1;
+    vertical-align:middle;
+}
+.qa-mode-icon svg,
+.qa-btn-icon svg{
+    width:14px;
+    height:14px;
+    display:block;
+}
+.qa-title-icon{
+    /* White rocket so it reads clearly on the brand-tinted header (blue at
+       #1976d2 in light theme). Using --qa-on-brand keeps it in sync with
+       the header text colour if the brand palette ever changes. */
+    color:var(--qa-on-brand);
+    margin-right:2px;
+}
+.qa-title-icon svg{
+    width:16px;
+    height:16px;
+    display:block;
+}
+/* Vertical (rotated) collapsed strip uses writing-mode:vertical-rl on
+   .qa-title, which would rotate the SVG oddly — hide the rocket only in
+   that state. The horizontal collapsed bar keeps the icon visible so the
+   pill still reads as "[🚀] QA Assistant". */
+#qa-panel.qa-collapsed.qa-collapsed-vert .qa-title-icon{ display:none; }
 
 .qa-section-toggle{
     position:relative;
@@ -557,6 +682,66 @@
     box-shadow:var(--qa-shadow-btn);
 }
 .qa-tmpl-wrap[hidden]{ display:none; }
+
+/* ---------- Agile Boards row (Redmine only) ----------
+   On Redmine, the four board buttons are laid out in a single row that
+   shrinks its buttons instead of wrapping. On the launcher (dev.cloudapper.com)
+   the .qa-launcher class stays on #qa-panel and this rule is skipped, so board
+   buttons render in the default vertical stack there. */
+.qa-boards-row{
+    margin:0 0 6px;
+}
+#qa-panel:not(.qa-launcher) .qa-boards-row{
+    display:flex;
+    flex-wrap:nowrap;
+    gap:6px;
+    container-type:inline-size;
+}
+#qa-panel:not(.qa-launcher) .qa-boards-row .qa-board-btn{
+    width:auto;
+    flex:1 1 0;
+    min-width:0;
+    margin-bottom:0;
+    padding:8px 6px;
+    justify-content:center;
+    gap:5px;
+    font-size:12px;
+    text-align:center;
+    white-space:nowrap;
+}
+#qa-panel:not(.qa-launcher) .qa-boards-row .qa-board-label{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+}
+/* Trailing " Board" word is redundant when the section is titled
+   "Agile Boards" — drop it in the row layout. Launcher keeps it. */
+#qa-panel:not(.qa-launcher) .qa-boards-row .qa-board-suffix{
+    display:none;
+}
+/* The ⇧N shortcut chip is redundant in the compact row — hide it on
+   Redmine. Launcher (stacked layout) still shows it. Alt+Shift+1..4
+   shortcuts continue to work either way. */
+#qa-panel:not(.qa-launcher) .qa-boards-row .qa-board-btn kbd{
+    display:none;
+}
+/* When the row itself becomes very narrow, drop the project name entirely
+   and leave the icon + ⇧N chip (or icon alone — the kbd chip is already
+   hidden on Redmine). Truncating the name to a couple of characters gave
+   ugly clipped text like "We…", so we hide it cleanly instead. The
+   button's title="…" keeps the intent discoverable on hover. */
+@container (max-width: 320px){
+    #qa-panel:not(.qa-launcher) .qa-boards-row .qa-board-name,
+    #qa-panel:not(.qa-launcher) .qa-boards-row .qa-board-suffix{
+        display:none;
+    }
+    #qa-panel:not(.qa-launcher) .qa-boards-row .qa-board-label{
+        gap:0;
+    }
+}
 
 .qa-btn{
     position:relative;
@@ -678,12 +863,36 @@
 
 .qa-template-actions{
     display:flex;
+    flex-wrap:nowrap;
     gap:6px;
+    /* Container query context: the label inside each button is hidden when the
+       row itself gets narrow, so the buttons stay side-by-side and shrink to
+       icon-only instead of wrapping onto a second line. */
+    container-type:inline-size;
 }
 .qa-tmpl-btn{
     justify-content:center;
     margin-bottom:0;
     font-size:12px;
+    /* Equal share, allowed to shrink below content width so 5 buttons stay
+       on one row. white-space:nowrap keeps the emoji + label glued together. */
+    flex:1 1 0;
+    min-width:0;
+    white-space:nowrap;
+    padding-left:8px;
+    padding-right:8px;
+    gap:6px;
+}
+.qa-tmpl-btn .qa-btn-label{
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+/* When the actions row is too narrow to fit 5 labelled buttons, drop the
+   text and leave the icons alone. The <button title="…"> gives users the
+   full name on hover — Alt+F / Alt+C / Alt+X shortcuts still work too. */
+@container (max-width: 340px){
+    .qa-tmpl-btn .qa-btn-label{ display:none; }
+    .qa-tmpl-btn{ padding-left:6px; padding-right:6px; }
 }
 
 /* ---------- AI mode: segmented toggle with sliding indicator ---------- */
@@ -700,7 +909,8 @@
 /* The sliding pill sits behind the two buttons. Its horizontal position is
    driven by [data-active] on the container so the movement is pure CSS — the
    JS handler just flips the attribute. Width = half the container minus the
-   3px padding on both sides + the 3px gap between the buttons. */
+   3px padding on both sides + the 3px gap between the buttons.
+   AI sits on the LEFT (default), Template on the RIGHT. */
 .qa-mode-switch::before{
     content:"";
     position:absolute;
@@ -718,8 +928,10 @@
     pointer-events:none;
 }
 .qa-mode-switch[data-active="ai"]::before{
-    transform:translateX(calc(100% + 3px));
     border-color:color-mix(in srgb, var(--qa-accent) 35%, var(--qa-border));
+}
+.qa-mode-switch[data-active="template"]::before{
+    transform:translateX(calc(100% + 3px));
 }
 .qa-mode-btn{
     position:relative;
@@ -809,9 +1021,30 @@
     color:var(--qa-ok);
 }
 .qa-ai-key-saved .qa-tmpl-btn{
+    /* Compact, chip-like Change button: doesn't stretch to fill the row
+       (overrides .qa-tmpl-btn's flex:1) and gets a subtle raised shadow +
+       hover lift so it reads as a clickable button next to the plain
+       "API key saved" status text. */
+    flex:0 0 auto;
     width:auto;
+    padding:5px 10px;
+    font-size:11px;
+    font-weight:600;
     white-space:nowrap;
     margin-bottom:0;
+    background:var(--qa-surface);
+    border:1px solid var(--qa-border);
+    box-shadow:0 1px 0 rgba(0,0,0,.04), inset 0 1px 0 rgba(255,255,255,.6);
+}
+.qa-ai-key-saved .qa-tmpl-btn:hover{
+    background:var(--qa-brand-tint);
+    border-color:var(--qa-brand);
+    color:var(--qa-brand-strong);
+    box-shadow:0 2px 4px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,.6);
+}
+.qa-ai-key-saved .qa-tmpl-btn:active{
+    transform:translateY(1px);
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.08);
 }
 
 .qa-ai-model-row{
