@@ -2,7 +2,7 @@
 // @name         QA Assistant for Redmine
 // @namespace    QA
 // @version      5.31
-// @description  Switch project, auto-fill bug template, AI bug-report assistant, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
+// @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
 // @grant        GM_xmlhttpRequest

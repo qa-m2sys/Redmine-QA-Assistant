@@ -1,10 +1,18 @@
 # QA Assistant for Redmine
 
-A lightweight helper that streamlines bug reporting on
-`https://redmine.kernello.com`. It adds a floating panel that lets QA engineers
-jump straight to a project's **New Bug** form, auto-fills a consistent bug
-template (tracker, status, priority, assignee and description), and offers
-handy copy/clear tools — all without touching Redmine's markup.
+A lightweight helper that streamlines **issue reporting** on
+`https://redmine.kernello.com` for both **QA engineers and developers**. It
+adds a floating panel that lets you jump straight to a project's **New issue**
+form for any tracker (**Bug, Feature, Task, User story, Test case** or
+**Suggestion**), auto-fills a consistent **per-tracker** template (tracker,
+status, priority, assignee and description), optionally uses **OpenAI** to
+turn rough notes into a fully structured report, and offers handy copy/clear
+tools — all without touching Redmine's markup.
+
+The same panel also runs on the app under test, `https://dev.cloudapper.com`,
+as a **launcher**: pick a tracker + project and it opens the matching Redmine
+New-issue form in a new tab — so you can report or open a board without ever
+leaving the app you're testing.
 
 It ships in **two interchangeable forms** so you can use whichever fits your setup:
 
@@ -35,21 +43,30 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
   that project are filled in automatically once the form loads.
 - **Fill Template** — Manually (re)apply the template to the current issue form
   at any time.
-- **Editable description template** — Expand the *Step 3 · Description source*
-  section (placed right below the project picker) to edit your own template.
-  **Save** stores it locally; **Reset** restores the shipped default. Your
-  template is used for Fill, Copy and auto-fill.
+- **Per-tracker description templates** — Every tracker (Bug, Feature, Task,
+  User story, Test case, Suggestion) ships with its own default template
+  shaped for that kind of report: Steps + Expected Scenario for bugs,
+  Acceptance Criteria for features / user stories, Checklist for tasks,
+  Test Steps + Expected Result for test cases, Current / Suggested / Benefit
+  for suggestions, and so on. Expand the *Step 3 · Description source*
+  section to edit the template for whichever tracker is currently selected
+  in the panel. **Save** stores it locally under that tracker; **Reset**
+  restores the shipped default for that tracker only. Your template drives
+  Fill, Copy, auto-fill **and** the AI assistant's scaffolding.
 - **AI report assistant** — Use the segmented **Template / AI** toggle to
   switch to **AI** mode and chat with OpenAI, turning rough notes into a
   structured report. The assistant **adapts to the selected tracker** — Bug,
   Feature, Task, User story, Test case or Suggestion — using the right title
   wording and description structure for each (e.g. acceptance criteria for user
-  stories, test steps for test cases).
-  It's a **multi-turn chat** (refine the result with follow-ups), returns an
-  editable **Subject** and **Description** for review, and fills both into the
-  Redmine form on demand. Includes a **model selector** (`gpt-4o` by default,
-  plus `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4-turbo`). You supply your
-  own OpenAI API key, stored locally in the browser.
+  stories, test steps for test cases) and honours **your saved per-tracker
+  template** as the scaffold.
+  It's a **multi-turn chat** (refine the result with follow-ups), shows
+  animated "typing" dots while the model is thinking, and returns an editable
+  **Subject** and **Description** in a review card that pulses + scrolls into
+  view when it appears so you can't miss it. Fill both into the Redmine form on
+  demand. Includes a **model selector** (`gpt-4o` by default, plus
+  `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4-turbo`). You supply your own
+  OpenAI API key, stored locally in the browser.
 - **Copy Description** — Copies the current template text to the clipboard.
 - **Clear Form** — Clears the subject and description fields in one click.
 - **Toast notifications** — Small confirmations for every action.
@@ -73,6 +90,13 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
   position, theme, and your custom template all persist across page loads.
 - **Scrollbar-aware placement** — The panel and pill stay fully on-screen and
   never slip underneath the browser's scrollbar.
+- **Modern visual polish** — Frosted-glass (mica-style) panel with backdrop
+  blur + saturation, inline-SVG icons that inherit theme colour, soft
+  box-shadow focus rings that follow each control's border-radius, a sliding
+  pill in the Template / AI switch, animated typing dots while the AI is
+  thinking, a reveal pulse on the AI review card, and a subtle fade + rise
+  entry animation on first mount — all skipped when `prefers-reduced-motion`
+  is set.
 
 ---
 
@@ -91,8 +115,8 @@ layout (including the macOS Option key).
 | `Alt` + `Shift` + `2` | Open the **Backend** agile board |
 | `Alt` + `Shift` + `3` | Open the **iOS** agile board |
 | `Alt` + `Shift` + `4` | Open the **Android** agile board |
-| `Alt` + `F` | **Fill** the bug template into the current form |
-| `Alt` + `C` | **Copy** the description template to the clipboard |
+| `Alt` + `F` | **Fill** the issue template into the current form |
+| `Alt` + `C` | **Copy** the current tracker's description template to the clipboard |
 | `Alt` + `X` | **Clear** the form (subject + description) |
 | `Alt` + `Q` | **Collapse / expand** the panel |
 
