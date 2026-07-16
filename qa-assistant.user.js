@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      5.43
+// @version      5.45
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -2545,13 +2545,14 @@ As a <role>, I want <goal> so that <benefit>.
 .qa-ai-key{ display:flex; gap:6px; align-items:stretch; }
 .qa-ai-key .qa-ai-field{ flex:1; margin-bottom:6px; }
 .qa-ai-key .qa-tmpl-btn{
+    flex:0 0 auto;
     width:auto;
     white-space:nowrap;
     margin-bottom:6px;
-    padding-top:0;
-    padding-bottom:0;
+    padding:6px 10px;
+    align-self:center;
 }
-.qa-ai-key-edit{ display:flex; gap:6px; align-items:stretch; flex:1; }
+.qa-ai-key-edit{ display:flex; gap:6px; align-items:center; flex:1; }
 .qa-ai-key-edit[hidden]{ display:none; }
 
 /* Mask the API key without using type="password" — that prevents browsers and
@@ -2563,9 +2564,15 @@ As a <role>, I want <goal> so that <benefit>.
     letter-spacing:0.05em;
 }
 .qa-icon-btn{
+    flex:0 0 auto;
     width:auto;
-    padding:0 8px;
+    padding:6px 8px;
     line-height:1;
+}
+.qa-icon-btn svg{
+    width:14px;
+    height:14px;
+    display:block;
 }
 .qa-ai-key-saved{
     display:flex;

@@ -5,7 +5,31 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 5.43 — current
+## Version 5.45 — current
+
+### Bug fixes
+- ✅ Fixed the **Show/Hide key** eye icon being invisible. The SVG inside
+  `.qa-icon-btn` had no explicit dimensions and was collapsing to 0×0 because
+  the button lacked the `.qa-btn-icon` wrapper that normally sizes SVGs. Added
+  `.qa-icon-btn svg { width:14px; height:14px; display:block }` so the eye
+  renders at a visible size.
+
+---
+
+## Version 5.44
+
+### Bug fixes
+- ✅ Fixed the **Show/Hide key** and **Save** buttons in the API key section
+  being malformed (stretched/collapsed). The buttons now render as compact,
+  auto-width pills at a consistent height. Root cause: the `.qa-tmpl-btn`
+  base class had `flex:1 1 0` (for the 5-button actions row) which made the
+  key buttons grow to fill the row, and `padding-top/bottom:0` collapsed them
+  vertically. Fixed with `flex:0 0 auto`, proper padding, and
+  `align-items:center` on the edit row.
+
+---
+
+## Version 5.43
 
 ### Redmine panel opens tall enough to show everything
 - 📏 **`#qa-panel:not(.qa-launcher)` (Redmine expanded state) now has
