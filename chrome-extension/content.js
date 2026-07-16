@@ -34,6 +34,9 @@
     // for Fill / Copy / auto-fill. "Reset" restores this default.
     const DEFAULT_DESCRIPTION = `
 
+*Description:*
+
+
 *Steps:*
 #
 #
@@ -67,10 +70,19 @@
         tmplOpen:  "qa-template-open",
         boardsOpen:"qa-boards-open",
         lastBoard: "qa-last-board",
-        theme:     "qa-theme"
+        theme:     "qa-theme",
+        aiMode:    "qa-ai-mode",
+        aiKey:     "qa-openai-key",
+        aiModel:   "qa-openai-model"
     };
 
     const MAX_AUTOFILL_TRIES = 40; // ~12s at 300ms
+
+    // Default OpenAI model for the AI bug-report assistant.
+    const AI_DEFAULT_MODEL = "gpt-4o";
+
+    // Models offered in the AI-mode selector.
+    const AI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4-turbo"];
 
     // Shown in the panel footer. Read from the extension manifest or the userscript
     // metadata so it always matches the shipped version (no extra place to update).
@@ -89,6 +101,76 @@
     function saveTemplate(text) {
         localStorage.setItem(STORAGE.template, text);
     }
+
+    //////////////////////////////////////////////////////
+    // AI assistant (OpenAI)
+    //////////////////////////////////////////////////////
+
+    const AI = {
+        key:   () => (localStorage.getItem(STORAGE.aiKey) || "").trim(),
+        model: () => (localStorage.getItem(STORAGE.aiModel) || AI_DEFAULT_MODEL),
+        setKey: (k) => localStorage.setItem(STORAGE.aiKey, (k || "").trim())
+    };
+
+    // Instructions that make the model return a predictable JSON shape so we can
+    // split its answer into a chat reply plus reviewable subject/description.
+    function aiSystemPrompt() {
+        return [
+            "You are a QA assistant that turns a tester's rough notes into a well-structured Redmine bug report.",
+            "Always respond with a JSON object containing exactly these keys:",
+            '- "reply": a short, friendly message to the tester (max 2 sentences) about what you produced or what you still need.',
+            '- "subject": a concise, specific bug title (<= 120 chars). Use an empty string if there is not enough information yet.',
+            '- "description": the full bug description formatted using EXACTLY this template structure, filling in what the notes provide and keeping the placeholders for anything missing:',
+            "-----",
+            getTemplate(),
+            "-----",
+            "Only use facts the tester provided. Do not invent steps, credentials, or versions. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and give a best-effort subject/description."
+        ].join("\n");
+    }
+
+    // Sends the running conversation to OpenAI (via the background worker in the
+    // extension, or GM_xmlhttpRequest in the userscript) and resolves with the
+    // parsed { reply, subject, description } object.
+    function aiTransport(payload) {
+        return new Promise((resolve, reject) => {
+            if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+                chrome.runtime.sendMessage({ type: "qa-openai", payload, key: AI.key() }, (resp) => {
+                    if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+                    if (!resp) { reject(new Error("No response from the extension background.")); return; }
+                    if (resp.error) { reject(new Error(resp.error)); return; }
+                    resolve(resp.data);
+                });
+            } else {
+                reject(new Error("AI transport unavailable in this context."));
+            }
+        });
+    }
+
+    async function aiChat(history) {
+        if (!AI.key()) throw new Error("No API key set. Paste your OpenAI API key first.");
+        const payload = {
+            model: AI.model(),
+            temperature: 0.3,
+            response_format: { type: "json_object" },
+            messages: [{ role: "system", content: aiSystemPrompt() }].concat(history)
+        };
+        const data = await aiTransport(payload);
+        const content = data && data.choices && data.choices[0] && data.choices[0].message
+            ? data.choices[0].message.content : "";
+        let parsed;
+        try {
+            parsed = JSON.parse(content);
+        } catch (_) {
+            parsed = { reply: content || "(no response)", subject: "", description: "" };
+        }
+        return {
+            raw: content,
+            reply: parsed.reply || "",
+            subject: parsed.subject || "",
+            description: parsed.description || ""
+        };
+    }
+
 
     // Returns "dark" or "light". Falls back to the OS preference when unset.
     function getTheme() {
@@ -197,6 +279,21 @@
             fireEvents(subject);
         }
         toast("Form cleared");
+    }
+
+    // Fills Redmine's Subject + Description from the AI-reviewed values.
+    function fillIssueFields(subject, description) {
+        const subj = document.getElementById("issue_subject");
+        if (subj && subject) {
+            subj.value = subject;
+            fireEvents(subj);
+        }
+        const desc = document.getElementById("issue_description");
+        if (desc && description) {
+            desc.value = description;
+            fireEvents(desc);
+        }
+        toast("Filled from AI");
     }
 
     async function copyDescription() {
@@ -341,12 +438,54 @@
                     <span class="qa-caret" id="qa-tmpl-caret">▸</span>
                 </button>
                 <div class="qa-tmpl-wrap" id="qa-tmpl-wrap" hidden>
-                    <textarea id="qa-template-input" class="qa-template-input"
-                              spellcheck="false"
-                              placeholder="Type your description template here…"></textarea>
-                    <div class="qa-template-actions">
-                        <button class="qa-btn qa-tmpl-btn" data-action="save-template">💾 Save</button>
-                        <button class="qa-btn qa-tmpl-btn" data-action="reset-template">↺ Reset</button>
+                    <label class="qa-mode-switch" title="Switch between template editing and the AI assistant">
+                        <span class="qa-mode-name" data-mode="template">📝 Template</span>
+                        <span class="qa-switch"><input type="checkbox" id="qa-ai-toggle"><span class="qa-switch-track"></span></span>
+                        <span class="qa-mode-name" data-mode="ai">🤖 AI</span>
+                    </label>
+
+                    <div id="qa-tmpl-mode">
+                        <textarea id="qa-template-input" class="qa-template-input"
+                                  spellcheck="false"
+                                  placeholder="Type your description template here…"></textarea>
+                        <div class="qa-template-actions">
+                            <button class="qa-btn qa-tmpl-btn" data-action="save-template">💾 Save</button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="reset-template">↺ Reset</button>
+                        </div>
+                    </div>
+
+                    <div id="qa-ai-mode" hidden>
+                        <div class="qa-ai-key" id="qa-ai-key">
+                            <div class="qa-ai-key-saved" id="qa-ai-key-saved" hidden>
+                                <span class="qa-ai-key-status">🔑 API key saved</span>
+                                <button class="qa-btn qa-tmpl-btn" data-action="ai-change-key">Change</button>
+                            </div>
+                            <div class="qa-ai-key-edit" id="qa-ai-key-edit">
+                                <input type="password" id="qa-ai-key-input" class="qa-ai-field"
+                                       placeholder="OpenAI API key (sk-…)" autocomplete="off" spellcheck="false">
+                                <button class="qa-btn qa-tmpl-btn" data-action="ai-save-key">🔑 Save</button>
+                            </div>
+                        </div>
+                        <label class="qa-ai-model-row">
+                            <span>Model</span>
+                            <select id="qa-ai-model" class="qa-ai-field">
+                                ${AI_MODELS.map((m) => `<option value="${m}">${m}</option>`).join("")}
+                            </select>
+                        </label>
+                        <div class="qa-ai-chat" id="qa-ai-chat"></div>
+                        <textarea id="qa-ai-input" class="qa-ai-field qa-ai-compose"
+                                  rows="3" spellcheck="false"
+                                  placeholder="Describe the bug in rough words… (Ctrl+Enter to send)"></textarea>
+                        <div class="qa-template-actions">
+                            <button class="qa-btn qa-tmpl-btn" data-action="ai-send">✨ Structure</button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="ai-clear">🧹 Reset Chat</button>
+                        </div>
+                        <div class="qa-ai-review" id="qa-ai-review" hidden>
+                            <div class="qa-section-label">Review &amp; edit before filling</div>
+                            <input type="text" id="qa-ai-subject" class="qa-ai-field" placeholder="Subject">
+                            <textarea id="qa-ai-desc" class="qa-template-input" spellcheck="false" placeholder="Description"></textarea>
+                            <button class="qa-btn qa-tmpl-btn qa-ai-fill" data-action="ai-fill">⬇️ Fill Subject &amp; Description</button>
+                        </div>
                     </div>
                 </div>` : "";
 
@@ -415,6 +554,134 @@
                 tmplInput.value = DEFAULT_DESCRIPTION;
                 toast("Template reset to default");
             });
+
+            // ---- AI assistant mode ----
+            const aiToggle   = panel.querySelector("#qa-ai-toggle");
+            const tmplModeEl = panel.querySelector("#qa-tmpl-mode");
+            const aiModeEl   = panel.querySelector("#qa-ai-mode");
+            const aiKeyRow   = panel.querySelector("#qa-ai-key");
+            const aiKeySaved = panel.querySelector("#qa-ai-key-saved");
+            const aiKeyEdit  = panel.querySelector("#qa-ai-key-edit");
+            const aiKeyInput = panel.querySelector("#qa-ai-key-input");
+            const aiModelSel = panel.querySelector("#qa-ai-model");
+            const aiChatEl   = panel.querySelector("#qa-ai-chat");
+            const aiInput    = panel.querySelector("#qa-ai-input");
+            const aiReview   = panel.querySelector("#qa-ai-review");
+            const aiSubject  = panel.querySelector("#qa-ai-subject");
+            const aiDesc     = panel.querySelector("#qa-ai-desc");
+
+            // Keep typing inside AI fields from triggering drag / shortcuts.
+            [aiKeyInput, aiInput, aiSubject, aiDesc].forEach((el) => {
+                el.addEventListener("mousedown", (e) => e.stopPropagation());
+                el.addEventListener("keydown",   (e) => e.stopPropagation());
+            });
+
+            // Conversation history sent to OpenAI (roles: user / assistant).
+            const aiHistory = [];
+
+            function refreshKeyRow() {
+                const hasKey = !!AI.key();
+                aiKeySaved.hidden = !hasKey;
+                aiKeyEdit.hidden = hasKey;
+            }
+
+            function addBubble(role, text) {
+                const b = document.createElement("div");
+                b.className = "qa-bubble qa-bubble-" + role;
+                b.textContent = text;
+                aiChatEl.appendChild(b);
+                aiChatEl.scrollTop = aiChatEl.scrollHeight;
+                return b;
+            }
+
+            function setAiMode(on) {
+                aiModeEl.hidden = !on;
+                tmplModeEl.hidden = on;
+                aiToggle.checked = on;
+                panel.querySelector(".qa-mode-switch").classList.toggle("qa-ai-on", on);
+                localStorage.setItem(STORAGE.aiMode, on ? "1" : "0");
+                if (on) refreshKeyRow();
+            }
+
+            aiToggle.addEventListener("change", () => setAiMode(aiToggle.checked));
+
+            // Model selector (persisted; falls back to the default).
+            aiModelSel.value = AI.model();
+            if (!aiModelSel.value) aiModelSel.value = AI_DEFAULT_MODEL;
+            aiModelSel.addEventListener("mousedown", (e) => e.stopPropagation());
+            aiModelSel.addEventListener("change", () => {
+                localStorage.setItem(STORAGE.aiModel, aiModelSel.value);
+                toast("Model: " + aiModelSel.value);
+            });
+
+            panel.querySelector('[data-action="ai-save-key"]').addEventListener("click", () => {
+                const k = aiKeyInput.value.trim();
+                if (!k) { toast("Paste a key first"); return; }
+                AI.setKey(k);
+                aiKeyInput.value = "";
+                refreshKeyRow();
+                toast("API key saved");
+            });
+
+            // "Change" reveals the input again so the user can replace the key.
+            panel.querySelector('[data-action="ai-change-key"]').addEventListener("click", () => {
+                aiKeySaved.hidden = true;
+                aiKeyEdit.hidden = false;
+                aiKeyInput.placeholder = "Enter new OpenAI API key (sk-…)";
+                aiKeyInput.focus();
+            });
+
+            async function sendToAi() {
+                const text = aiInput.value.trim();
+                if (!text) return;
+                if (!AI.key()) { refreshKeyRow(); toast("Add your OpenAI API key first"); return; }
+
+                addBubble("user", text);
+                aiHistory.push({ role: "user", content: text });
+                aiInput.value = "";
+
+                const thinking = addBubble("ai", "Thinking…");
+                const sendBtn = panel.querySelector('[data-action="ai-send"]');
+                sendBtn.disabled = true;
+                try {
+                    const res = await aiChat(aiHistory);
+                    aiHistory.push({ role: "assistant", content: res.raw || JSON.stringify(res) });
+                    thinking.textContent = res.reply || "Done.";
+                    if (res.subject || res.description) {
+                        aiSubject.value = res.subject || aiSubject.value;
+                        aiDesc.value = res.description || aiDesc.value;
+                        aiReview.hidden = false;
+                    }
+                } catch (err) {
+                    thinking.classList.add("qa-bubble-error");
+                    thinking.textContent = "⚠️ " + err.message;
+                } finally {
+                    sendBtn.disabled = false;
+                }
+            }
+
+            panel.querySelector('[data-action="ai-send"]').addEventListener("click", sendToAi);
+            aiInput.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    sendToAi();
+                }
+            });
+
+            panel.querySelector('[data-action="ai-clear"]').addEventListener("click", () => {
+                aiHistory.length = 0;
+                aiChatEl.innerHTML = "";
+                aiReview.hidden = true;
+                aiSubject.value = "";
+                aiDesc.value = "";
+                toast("Chat reset");
+            });
+
+            panel.querySelector('[data-action="ai-fill"]').addEventListener("click", () => {
+                fillIssueFields(aiSubject.value, aiDesc.value);
+            });
+
+            setAiMode(localStorage.getItem(STORAGE.aiMode) === "1");
         }
 
         // Agile Boards collapse (hidden until user expands)

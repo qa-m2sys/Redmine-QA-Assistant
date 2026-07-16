@@ -36,6 +36,13 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
 - **Editable description template** — Expand the *Description Template* section
   to edit your own template. **Save** stores it locally; **Reset** restores the
   shipped default. Your template is used for Fill, Copy and auto-fill.
+- **AI bug-report assistant** — Flip the *Description Template* section to **AI**
+  mode to chat with OpenAI and turn rough notes into a structured bug report.
+  It's a **multi-turn chat** (refine the result with follow-ups), returns an
+  editable **Subject** and **Description** for review, and fills both into the
+  Redmine form on demand. Includes a **model selector** (`gpt-4o` by default,
+  plus `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4-turbo`). You supply your
+  own OpenAI API key, stored locally in the browser.
 - **Copy Description** — Copies the current template text to the clipboard.
 - **Clear Form** — Clears the subject and description fields in one click.
 - **Toast notifications** — Small confirmations for every action.
@@ -144,6 +151,21 @@ powershell -ExecutionPolicy Bypass -File .\package-extension.ps1
   act on the Redmine issue form).
 - Keep the extension and userscript in sync when making changes — they share the
   same logic and styles.
+
+### AI mode
+
+- **Bring your own OpenAI API key.** Paste it once in the *AI* view; it's stored
+  in the browser's `localStorage` (per device) and reused. Requests go **directly
+  to OpenAI** — use a personal or limited-scope key, since anyone with access to
+  the browser profile can read it.
+- Once saved, the key field shows a **🔑 API key saved** indicator with a
+  **Change** button so you can replace the key whenever you like.
+- The **extension** sends the request from a background service worker and
+  declares the `https://api.openai.com/*` host permission (so it isn't blocked by
+  Redmine's Content-Security-Policy). After updating, **reload the extension** at
+  `chrome://extensions` to pick up the new permission.
+- The **userscript** uses `GM_xmlhttpRequest` with `@connect api.openai.com`.
+  After updating, approve the new grant when Tampermonkey prompts.
 
 ---
 

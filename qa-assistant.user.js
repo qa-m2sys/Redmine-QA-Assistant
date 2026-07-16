@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      4.21
-// @description  Switch project, auto-fill bug template, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
+// @version      5.1
+// @description  Switch project, auto-fill bug template, AI bug-report assistant, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      api.openai.com
 // ==/UserScript==
 
 (function () {
@@ -38,6 +39,9 @@
     // panel; their version is saved in localStorage (STORAGE.template) and used
     // for Fill / Copy / auto-fill. "Reset" restores this default.
     const DEFAULT_DESCRIPTION = `
+
+*Description:*
+
 
 *Steps:*
 #
@@ -72,10 +76,19 @@
         tmplOpen:  "qa-template-open",
         boardsOpen:"qa-boards-open",
         lastBoard: "qa-last-board",
-        theme:     "qa-theme"
+        theme:     "qa-theme",
+        aiMode:    "qa-ai-mode",
+        aiKey:     "qa-openai-key",
+        aiModel:   "qa-openai-model"
     };
 
     const MAX_AUTOFILL_TRIES = 40; // ~12s at 300ms
+
+    // Default OpenAI model for the AI bug-report assistant.
+    const AI_DEFAULT_MODEL = "gpt-4o";
+
+    // Models offered in the AI-mode selector.
+    const AI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4-turbo"];
 
     // Shown in the panel footer. Read from the extension manifest or the userscript
     // metadata so it always matches the shipped version (no extra place to update).
@@ -94,6 +107,89 @@
     function saveTemplate(text) {
         localStorage.setItem(STORAGE.template, text);
     }
+
+    //////////////////////////////////////////////////////
+    // AI assistant (OpenAI)
+    //////////////////////////////////////////////////////
+
+    const AI = {
+        key:   () => (localStorage.getItem(STORAGE.aiKey) || "").trim(),
+        model: () => (localStorage.getItem(STORAGE.aiModel) || AI_DEFAULT_MODEL),
+        setKey: (k) => localStorage.setItem(STORAGE.aiKey, (k || "").trim())
+    };
+
+    // Instructions that make the model return a predictable JSON shape so we can
+    // split its answer into a chat reply plus reviewable subject/description.
+    function aiSystemPrompt() {
+        return [
+            "You are a QA assistant that turns a tester's rough notes into a well-structured Redmine bug report.",
+            "Always respond with a JSON object containing exactly these keys:",
+            '- "reply": a short, friendly message to the tester (max 2 sentences) about what you produced or what you still need.',
+            '- "subject": a concise, specific bug title (<= 120 chars). Use an empty string if there is not enough information yet.',
+            '- "description": the full bug description formatted using EXACTLY this template structure, filling in what the notes provide and keeping the placeholders for anything missing:',
+            "-----",
+            getTemplate(),
+            "-----",
+            "Only use facts the tester provided. Do not invent steps, credentials, or versions. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and give a best-effort subject/description."
+        ].join("\n");
+    }
+
+    // Sends the running conversation to OpenAI. In the userscript this uses
+    // GM_xmlhttpRequest (with @connect api.openai.com) to bypass the page CSP.
+    function aiTransport(payload) {
+        return new Promise((resolve, reject) => {
+            if (typeof GM_xmlhttpRequest === "undefined") {
+                reject(new Error("GM_xmlhttpRequest unavailable. Grant it in the userscript header."));
+                return;
+            }
+            GM_xmlhttpRequest({
+                method: "POST",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " + AI.key()
+                },
+                data: JSON.stringify(payload),
+                onload: (resp) => {
+                    let data = {};
+                    try { data = JSON.parse(resp.responseText); } catch (_) { /* non-JSON */ }
+                    if (resp.status < 200 || resp.status >= 300) {
+                        reject(new Error((data.error && data.error.message) || ("HTTP " + resp.status)));
+                        return;
+                    }
+                    resolve(data);
+                },
+                onerror: () => reject(new Error("Network error")),
+                ontimeout: () => reject(new Error("Request timed out"))
+            });
+        });
+    }
+
+    async function aiChat(history) {
+        if (!AI.key()) throw new Error("No API key set. Paste your OpenAI API key first.");
+        const payload = {
+            model: AI.model(),
+            temperature: 0.3,
+            response_format: { type: "json_object" },
+            messages: [{ role: "system", content: aiSystemPrompt() }].concat(history)
+        };
+        const data = await aiTransport(payload);
+        const content = data && data.choices && data.choices[0] && data.choices[0].message
+            ? data.choices[0].message.content : "";
+        let parsed;
+        try {
+            parsed = JSON.parse(content);
+        } catch (_) {
+            parsed = { reply: content || "(no response)", subject: "", description: "" };
+        }
+        return {
+            raw: content,
+            reply: parsed.reply || "",
+            subject: parsed.subject || "",
+            description: parsed.description || ""
+        };
+    }
+
 
     // Returns "dark" or "light". Falls back to the OS preference when unset.
     function getTheme() {
@@ -202,6 +298,21 @@
             fireEvents(subject);
         }
         toast("Form cleared");
+    }
+
+    // Fills Redmine's Subject + Description from the AI-reviewed values.
+    function fillIssueFields(subject, description) {
+        const subj = document.getElementById("issue_subject");
+        if (subj && subject) {
+            subj.value = subject;
+            fireEvents(subj);
+        }
+        const desc = document.getElementById("issue_description");
+        if (desc && description) {
+            desc.value = description;
+            fireEvents(desc);
+        }
+        toast("Filled from AI");
     }
 
     async function copyDescription() {
@@ -346,12 +457,54 @@
                     <span class="qa-caret" id="qa-tmpl-caret">▸</span>
                 </button>
                 <div class="qa-tmpl-wrap" id="qa-tmpl-wrap" hidden>
-                    <textarea id="qa-template-input" class="qa-template-input"
-                              spellcheck="false"
-                              placeholder="Type your description template here…"></textarea>
-                    <div class="qa-template-actions">
-                        <button class="qa-btn qa-tmpl-btn" data-action="save-template">💾 Save</button>
-                        <button class="qa-btn qa-tmpl-btn" data-action="reset-template">↺ Reset</button>
+                    <label class="qa-mode-switch" title="Switch between template editing and the AI assistant">
+                        <span class="qa-mode-name" data-mode="template">📝 Template</span>
+                        <span class="qa-switch"><input type="checkbox" id="qa-ai-toggle"><span class="qa-switch-track"></span></span>
+                        <span class="qa-mode-name" data-mode="ai">🤖 AI</span>
+                    </label>
+
+                    <div id="qa-tmpl-mode">
+                        <textarea id="qa-template-input" class="qa-template-input"
+                                  spellcheck="false"
+                                  placeholder="Type your description template here…"></textarea>
+                        <div class="qa-template-actions">
+                            <button class="qa-btn qa-tmpl-btn" data-action="save-template">💾 Save</button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="reset-template">↺ Reset</button>
+                        </div>
+                    </div>
+
+                    <div id="qa-ai-mode" hidden>
+                        <div class="qa-ai-key" id="qa-ai-key">
+                            <div class="qa-ai-key-saved" id="qa-ai-key-saved" hidden>
+                                <span class="qa-ai-key-status">🔑 API key saved</span>
+                                <button class="qa-btn qa-tmpl-btn" data-action="ai-change-key">Change</button>
+                            </div>
+                            <div class="qa-ai-key-edit" id="qa-ai-key-edit">
+                                <input type="password" id="qa-ai-key-input" class="qa-ai-field"
+                                       placeholder="OpenAI API key (sk-…)" autocomplete="off" spellcheck="false">
+                                <button class="qa-btn qa-tmpl-btn" data-action="ai-save-key">🔑 Save</button>
+                            </div>
+                        </div>
+                        <label class="qa-ai-model-row">
+                            <span>Model</span>
+                            <select id="qa-ai-model" class="qa-ai-field">
+                                ${AI_MODELS.map((m) => `<option value="${m}">${m}</option>`).join("")}
+                            </select>
+                        </label>
+                        <div class="qa-ai-chat" id="qa-ai-chat"></div>
+                        <textarea id="qa-ai-input" class="qa-ai-field qa-ai-compose"
+                                  rows="3" spellcheck="false"
+                                  placeholder="Describe the bug in rough words… (Ctrl+Enter to send)"></textarea>
+                        <div class="qa-template-actions">
+                            <button class="qa-btn qa-tmpl-btn" data-action="ai-send">✨ Structure</button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="ai-clear">🧹 Reset Chat</button>
+                        </div>
+                        <div class="qa-ai-review" id="qa-ai-review" hidden>
+                            <div class="qa-section-label">Review &amp; edit before filling</div>
+                            <input type="text" id="qa-ai-subject" class="qa-ai-field" placeholder="Subject">
+                            <textarea id="qa-ai-desc" class="qa-template-input" spellcheck="false" placeholder="Description"></textarea>
+                            <button class="qa-btn qa-tmpl-btn qa-ai-fill" data-action="ai-fill">⬇️ Fill Subject &amp; Description</button>
+                        </div>
                     </div>
                 </div>` : "";
 
@@ -420,6 +573,134 @@
                 tmplInput.value = DEFAULT_DESCRIPTION;
                 toast("Template reset to default");
             });
+
+            // ---- AI assistant mode ----
+            const aiToggle   = panel.querySelector("#qa-ai-toggle");
+            const tmplModeEl = panel.querySelector("#qa-tmpl-mode");
+            const aiModeEl   = panel.querySelector("#qa-ai-mode");
+            const aiKeyRow   = panel.querySelector("#qa-ai-key");
+            const aiKeySaved = panel.querySelector("#qa-ai-key-saved");
+            const aiKeyEdit  = panel.querySelector("#qa-ai-key-edit");
+            const aiKeyInput = panel.querySelector("#qa-ai-key-input");
+            const aiModelSel = panel.querySelector("#qa-ai-model");
+            const aiChatEl   = panel.querySelector("#qa-ai-chat");
+            const aiInput    = panel.querySelector("#qa-ai-input");
+            const aiReview   = panel.querySelector("#qa-ai-review");
+            const aiSubject  = panel.querySelector("#qa-ai-subject");
+            const aiDesc     = panel.querySelector("#qa-ai-desc");
+
+            // Keep typing inside AI fields from triggering drag / shortcuts.
+            [aiKeyInput, aiInput, aiSubject, aiDesc].forEach((el) => {
+                el.addEventListener("mousedown", (e) => e.stopPropagation());
+                el.addEventListener("keydown",   (e) => e.stopPropagation());
+            });
+
+            // Conversation history sent to OpenAI (roles: user / assistant).
+            const aiHistory = [];
+
+            function refreshKeyRow() {
+                const hasKey = !!AI.key();
+                aiKeySaved.hidden = !hasKey;
+                aiKeyEdit.hidden = hasKey;
+            }
+
+            function addBubble(role, text) {
+                const b = document.createElement("div");
+                b.className = "qa-bubble qa-bubble-" + role;
+                b.textContent = text;
+                aiChatEl.appendChild(b);
+                aiChatEl.scrollTop = aiChatEl.scrollHeight;
+                return b;
+            }
+
+            function setAiMode(on) {
+                aiModeEl.hidden = !on;
+                tmplModeEl.hidden = on;
+                aiToggle.checked = on;
+                panel.querySelector(".qa-mode-switch").classList.toggle("qa-ai-on", on);
+                localStorage.setItem(STORAGE.aiMode, on ? "1" : "0");
+                if (on) refreshKeyRow();
+            }
+
+            aiToggle.addEventListener("change", () => setAiMode(aiToggle.checked));
+
+            // Model selector (persisted; falls back to the default).
+            aiModelSel.value = AI.model();
+            if (!aiModelSel.value) aiModelSel.value = AI_DEFAULT_MODEL;
+            aiModelSel.addEventListener("mousedown", (e) => e.stopPropagation());
+            aiModelSel.addEventListener("change", () => {
+                localStorage.setItem(STORAGE.aiModel, aiModelSel.value);
+                toast("Model: " + aiModelSel.value);
+            });
+
+            panel.querySelector('[data-action="ai-save-key"]').addEventListener("click", () => {
+                const k = aiKeyInput.value.trim();
+                if (!k) { toast("Paste a key first"); return; }
+                AI.setKey(k);
+                aiKeyInput.value = "";
+                refreshKeyRow();
+                toast("API key saved");
+            });
+
+            // "Change" reveals the input again so the user can replace the key.
+            panel.querySelector('[data-action="ai-change-key"]').addEventListener("click", () => {
+                aiKeySaved.hidden = true;
+                aiKeyEdit.hidden = false;
+                aiKeyInput.placeholder = "Enter new OpenAI API key (sk-…)";
+                aiKeyInput.focus();
+            });
+
+            async function sendToAi() {
+                const text = aiInput.value.trim();
+                if (!text) return;
+                if (!AI.key()) { refreshKeyRow(); toast("Add your OpenAI API key first"); return; }
+
+                addBubble("user", text);
+                aiHistory.push({ role: "user", content: text });
+                aiInput.value = "";
+
+                const thinking = addBubble("ai", "Thinking…");
+                const sendBtn = panel.querySelector('[data-action="ai-send"]');
+                sendBtn.disabled = true;
+                try {
+                    const res = await aiChat(aiHistory);
+                    aiHistory.push({ role: "assistant", content: res.raw || JSON.stringify(res) });
+                    thinking.textContent = res.reply || "Done.";
+                    if (res.subject || res.description) {
+                        aiSubject.value = res.subject || aiSubject.value;
+                        aiDesc.value = res.description || aiDesc.value;
+                        aiReview.hidden = false;
+                    }
+                } catch (err) {
+                    thinking.classList.add("qa-bubble-error");
+                    thinking.textContent = "⚠️ " + err.message;
+                } finally {
+                    sendBtn.disabled = false;
+                }
+            }
+
+            panel.querySelector('[data-action="ai-send"]').addEventListener("click", sendToAi);
+            aiInput.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    sendToAi();
+                }
+            });
+
+            panel.querySelector('[data-action="ai-clear"]').addEventListener("click", () => {
+                aiHistory.length = 0;
+                aiChatEl.innerHTML = "";
+                aiReview.hidden = true;
+                aiSubject.value = "";
+                aiDesc.value = "";
+                toast("Chat reset");
+            });
+
+            panel.querySelector('[data-action="ai-fill"]').addEventListener("click", () => {
+                fillIssueFields(aiSubject.value, aiDesc.value);
+            });
+
+            setAiMode(localStorage.getItem(STORAGE.aiMode) === "1");
         }
 
         // Agile Boards collapse (hidden until user expands)
@@ -1096,6 +1377,172 @@
     font-size:12px;
 }
 
+/* ---------- AI mode ---------- */
+.qa-mode-switch{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    margin:2px 0 10px;
+    cursor:pointer;
+    user-select:none;
+}
+.qa-mode-name{
+    font-size:11px;
+    font-weight:600;
+    color:#8a94a6;
+    transition:color .15s ease;
+}
+.qa-mode-name[data-mode="template"]{ color:#1f2933; }
+.qa-mode-switch.qa-ai-on .qa-mode-name[data-mode="template"]{ color:#8a94a6; }
+.qa-mode-switch.qa-ai-on .qa-mode-name[data-mode="ai"]{ color:#7b3fe4; }
+.qa-switch{ position:relative; display:inline-block; width:34px; height:18px; }
+.qa-switch input{ position:absolute; opacity:0; width:0; height:0; }
+.qa-switch-track{
+    position:absolute;
+    inset:0;
+    background:#cbd2d9;
+    border-radius:999px;
+    transition:background .18s ease;
+}
+.qa-switch-track::before{
+    content:"";
+    position:absolute;
+    top:2px;
+    left:2px;
+    width:14px;
+    height:14px;
+    background:#fff;
+    border-radius:50%;
+    box-shadow:0 1px 3px rgba(0,0,0,.3);
+    transition:transform .18s ease;
+}
+.qa-switch input:checked + .qa-switch-track{ background:#7b3fe4; }
+.qa-switch input:checked + .qa-switch-track::before{ transform:translateX(16px); }
+
+.qa-ai-field{
+    width:100%;
+    box-sizing:border-box;
+    padding:8px 9px;
+    margin-bottom:6px;
+    border:1px solid #e4e7eb;
+    border-radius:8px;
+    background:#fbfcfd;
+    color:#1f2933;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    font-size:12px;
+    line-height:1.45;
+    user-select:text;
+    transition:border-color .15s ease,box-shadow .15s ease;
+}
+.qa-ai-field:focus{
+    outline:none;
+    border-color:#7b3fe4;
+    box-shadow:0 0 0 3px rgba(123,63,228,.15);
+}
+.qa-ai-compose{ resize:vertical; min-height:52px; }
+
+.qa-ai-key{ display:flex; gap:6px; align-items:stretch; }
+.qa-ai-key .qa-ai-field{ flex:1; margin-bottom:6px; }
+.qa-ai-key .qa-tmpl-btn{
+    width:auto;
+    white-space:nowrap;
+    margin-bottom:6px;
+    padding-top:0;
+    padding-bottom:0;
+}
+.qa-ai-key-edit{ display:flex; gap:6px; align-items:stretch; flex:1; }
+.qa-ai-key-edit[hidden]{ display:none; }
+.qa-ai-key-saved{
+    display:flex;
+    gap:6px;
+    align-items:center;
+    flex:1;
+    margin-bottom:6px;
+}
+.qa-ai-key-saved[hidden]{ display:none; }
+.qa-ai-key-status{
+    flex:1;
+    font-size:12px;
+    font-weight:600;
+    color:#2e7d32;
+}
+.qa-ai-key-saved .qa-tmpl-btn{
+    width:auto;
+    white-space:nowrap;
+    margin-bottom:0;
+}
+
+.qa-ai-model-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:8px;
+    font-size:12px;
+    font-weight:600;
+    color:#1f2933;
+}
+.qa-ai-model-row > span{ flex:0 0 auto; }
+.qa-ai-model-row select.qa-ai-field{
+    flex:1;
+    margin-bottom:0;
+    height:32px;
+    line-height:normal;
+    padding:4px 9px;
+    cursor:pointer;
+}
+
+.qa-ai-chat{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    max-height:220px;
+    overflow-y:auto;
+    margin-bottom:8px;
+}
+.qa-ai-chat:empty{ display:none; }
+.qa-bubble{
+    max-width:90%;
+    padding:7px 10px;
+    border-radius:10px;
+    font-size:12px;
+    line-height:1.4;
+    white-space:pre-wrap;
+    word-break:break-word;
+}
+.qa-bubble-user{
+    align-self:flex-end;
+    background:#1976d2;
+    color:#fff;
+    border-bottom-right-radius:3px;
+}
+.qa-bubble-ai{
+    align-self:flex-start;
+    background:#f0eefe;
+    color:#3a2a6b;
+    border-bottom-left-radius:3px;
+}
+.qa-bubble-error{
+    background:#fde8e8;
+    color:#b12020;
+}
+
+.qa-ai-review{
+    margin-top:6px;
+    padding-top:8px;
+    border-top:1px dashed #e4e7eb;
+}
+.qa-ai-fill{
+    background:#7b3fe4;
+    border-color:#7b3fe4;
+    color:#fff;
+}
+.qa-ai-fill:hover{
+    background:#6a2fd0;
+    border-color:#6a2fd0;
+    color:#fff;
+}
+
 .qa-version{
     text-align:center;
     color:#8a94a6;
@@ -1164,6 +1611,27 @@
     border-color:#4a9eff;
     box-shadow:0 0 0 3px rgba(74,158,255,.2);
 }
+
+/* Dark mode — AI assistant */
+#qa-panel.qa-dark .qa-mode-name{ color:#9aa5b1; }
+#qa-panel.qa-dark .qa-mode-name[data-mode="template"]{ color:#e4e7eb; }
+#qa-panel.qa-dark .qa-mode-switch.qa-ai-on .qa-mode-name[data-mode="template"]{ color:#9aa5b1; }
+#qa-panel.qa-dark .qa-mode-switch.qa-ai-on .qa-mode-name[data-mode="ai"]{ color:#b79cff; }
+#qa-panel.qa-dark .qa-switch-track{ background:#4a5563; }
+#qa-panel.qa-dark .qa-ai-field{
+    background:#263340;
+    border-color:#3a4553;
+    color:#e4e7eb;
+}
+#qa-panel.qa-dark .qa-ai-field:focus{
+    border-color:#b79cff;
+    box-shadow:0 0 0 3px rgba(123,63,228,.25);
+}
+#qa-panel.qa-dark .qa-bubble-ai{ background:#2f2a4a; color:#d9d2f5; }
+#qa-panel.qa-dark .qa-bubble-error{ background:#4a2020; color:#ff9d9d; }
+#qa-panel.qa-dark .qa-ai-review{ border-top-color:#3a4553; }
+#qa-panel.qa-dark .qa-ai-model-row{ color:#e4e7eb; }
+#qa-panel.qa-dark .qa-ai-key-status{ color:#81c784; }
 `;
     document.head.appendChild(style);
 

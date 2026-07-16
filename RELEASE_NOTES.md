@@ -5,7 +5,50 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 4.21 — current
+## Version 5.1 — current
+
+### Improvements
+- ✅ **Saved API key state** — once you save your OpenAI key, the field is
+  replaced by a **🔑 API key saved** indicator with a **Change** button, so it's
+  clear a key is stored. Click **Change** to enter a new key.
+- ✅ The default description template now includes a **`*Description:*`** heading
+  above the Steps. (Click **Reset** in the template editor to adopt the new
+  default if you saved a custom one.)
+
+### Fixes
+- ✅ The AI **Model** label now matches the selector box, and the selected model
+  name is no longer clipped inside the dropdown.
+
+---
+
+## Version 5.0
+
+### New — AI bug-report assistant
+- ✅ The **Description Template** section now has a **Template ⟷ AI** toggle.
+  In **AI mode** you can chat with OpenAI to turn rough notes into a
+  well-structured bug report.
+  - **Multi-turn chat** — keeps the conversation so you can refine the result
+    ("add expected result", "make the steps more detailed", etc.).
+  - **Review before filling** — the AI returns a **Subject** and a
+    **Description** (formatted to your saved template) in editable fields; click
+    **Fill Subject & Description** to write them into the Redmine form.
+  - **Model selector** — choose between `gpt-4o` (default), `gpt-4o-mini`,
+    `gpt-4.1`, `gpt-4.1-mini`, and `gpt-4-turbo`. Your choice is remembered.
+  - **Bring your own key** — paste your OpenAI API key once; it's stored locally
+    in the browser (per device) and reused.
+- ✅ The extension routes the OpenAI request through a **background service
+  worker** so it isn't blocked by Redmine's Content-Security-Policy; the
+  userscript uses `GM_xmlhttpRequest` (`@connect api.openai.com`) for the same
+  reason.
+
+### Notes
+- The API key is stored in `localStorage` and requests go directly to OpenAI.
+  Use a personal/limited key — anyone with access to the browser profile can
+  read it.
+
+---
+
+## Version 4.21
 
 ### Improvements
 - ✅ On **dev.cloudapper.com**, the **Actions** (Fill / Copy / Clear) and
