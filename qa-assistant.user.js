@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      5.1
+// @version      5.2
 // @description  Switch project, auto-fill bug template, AI bug-report assistant, draggable/collapsible/dockable panel, dark mode, shortcuts, copy & clear tools
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -130,6 +130,7 @@
             "-----",
             getTemplate(),
             "-----",
+            "Under the *Description:* heading, write a concise 1-2 sentence summary of the bug (what is broken and where). Never leave *Description:* empty when the notes describe a problem.",
             "Only use facts the tester provided. Do not invent steps, credentials, or versions. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and give a best-effort subject/description."
         ].join("\n");
     }

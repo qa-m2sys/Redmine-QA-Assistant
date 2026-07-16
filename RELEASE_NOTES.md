@@ -5,7 +5,15 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 5.1 — current
+## Version 5.2 — current
+
+### Fixes
+- ✅ The AI assistant now writes a short 1-2 sentence summary under the
+  **`*Description:*`** heading instead of leaving it blank.
+
+---
+
+## Version 5.1
 
 ### Improvements
 - ✅ **Saved API key state** — once you save your OpenAI key, the field is

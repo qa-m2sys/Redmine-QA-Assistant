@@ -124,6 +124,7 @@
             "-----",
             getTemplate(),
             "-----",
+            "Under the *Description:* heading, write a concise 1-2 sentence summary of the bug (what is broken and where). Never leave *Description:* empty when the notes describe a problem.",
             "Only use facts the tester provided. Do not invent steps, credentials, or versions. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and give a best-effort subject/description."
         ].join("\n");
     }
