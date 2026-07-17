@@ -1216,6 +1216,261 @@
     font-family:inherit;
 }
 
+/* ---------- Bulk close (Agile board) ----------
+   Renders below the single-issue close section on any Redmine page but only
+   becomes visible on /projects/<x>/agile/board pages. Reuses the panel's
+   accent + surface tokens so it themes for free; the only bespoke visuals
+   are the count chip, the card checkbox overlays, and the confirmation
+   modal (which needs its own tokens because it's detached to <body>). */
+.qa-bulk-close-wrap[hidden]{ display:none; }
+.qa-bulk-close-wrap .qa-ai-model-row{ margin-top:2px; margin-bottom:6px; }
+.qa-bulk-fields[hidden]{ display:none; }
+
+.qa-bulk-toggle-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:8px;
+}
+.qa-bulk-select-btn{ flex:1 1 auto; }
+.qa-bulk-select-btn.qa-active{
+    background:var(--qa-brand-tint);
+    border-color:var(--qa-brand);
+    color:var(--qa-brand-strong);
+}
+.qa-bulk-count{
+    flex:0 0 auto;
+    padding:4px 10px;
+    border-radius:999px;
+    background:var(--qa-brand-tint);
+    color:var(--qa-brand-strong);
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:.2px;
+    white-space:nowrap;
+}
+.qa-bulk-count[hidden]{ display:none; }
+
+/* Card selection overlay: while `body.qa-selecting` is on, every agile-board
+   card gets a small checkbox in its top-right corner. We only touch the
+   card's position (relative) so the checkbox anchors correctly — no other
+   card chrome, per the "no permanent decoration" design decision. */
+body.qa-selecting .issue-card,
+body.qa-selecting .agile-issue{
+    position:relative;
+}
+.qa-card-checkbox{
+    position:absolute;
+    top:6px;
+    right:6px;
+    width:16px;
+    height:16px;
+    margin:0;
+    cursor:pointer;
+    z-index:20;
+    accent-color:#4a9eff;
+    box-shadow:0 1px 4px rgba(0,0,0,.25);
+    background:#fff;
+    border-radius:3px;
+}
+.qa-card-selected{
+    outline:2px solid #4a9eff !important;
+    outline-offset:-2px;
+    box-shadow:0 0 0 3px rgba(74,158,255,.25) !important;
+}
+
+/* ---------- Confirmation modal ----------
+   Lives directly under <body> (moved out of #qa-panel at wiring time so
+   backdrop-filter + overflow don't clip its overlay). Because it is
+   detached from the panel it can't inherit tokens — we redeclare the small
+   subset the modal needs and mirror the panel's `qa-dark` + `qa-accent-*`
+   classes onto the overlay in JS so it themes exactly like the panel. */
+.qa-modal-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(15,20,30,.55);
+    backdrop-filter:blur(3px);
+    -webkit-backdrop-filter:blur(3px);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:32px 16px;
+    z-index:2147483646;
+    opacity:0;
+    transition:opacity .18s ease;
+    --qa-brand:            #1f6feb;
+    --qa-brand-hover:      #175bb5;
+    --qa-brand-strong:     #0d1f3d;
+    --qa-brand-tint:       #e3ecfb;
+    --qa-brand-active-bg:  #d8e6fb;
+    --qa-brand-focus-ring: rgba(31,111,235,.22);
+    --qa-text:             #23272f;
+    --qa-muted:            #6b7280;
+    --qa-border:           #d7dae0;
+    --qa-surface:          #ffffff;
+    --qa-surface-alt:      #f4f6fa;
+    --qa-r-md:             10px;
+    --qa-on-brand:         #ffffff;
+    color:var(--qa-text);
+    font-family:"Inter", "SF Pro Text", "SF Pro", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+.qa-modal-overlay[hidden]{ display:none; }
+.qa-modal-overlay.qa-modal-open{ opacity:1; }
+
+.qa-modal-overlay.qa-dark{
+    --qa-brand:            #4a9eff;
+    --qa-brand-hover:      #3a8ae8;
+    --qa-brand-strong:     #cfe4ff;
+    --qa-brand-tint:       #33445a;
+    --qa-brand-active-bg:  #1e3a5f;
+    --qa-brand-focus-ring: rgba(74,158,255,.22);
+    --qa-text:             #e4e7eb;
+    --qa-muted:            #9aa5b1;
+    --qa-border:           #40495a;
+    --qa-surface:          #1a2130;
+    --qa-surface-alt:      #232b3b;
+}
+.qa-modal-overlay.qa-accent-lavender{ --qa-brand:#7b3fe4; --qa-brand-hover:#6935cf; }
+.qa-modal-overlay.qa-accent-orange  { --qa-brand:#e67e22; --qa-brand-hover:#c76914; }
+.qa-modal-overlay.qa-accent-red     { --qa-brand:#e57373; --qa-brand-hover:#cc5a5a; }
+.qa-modal-overlay.qa-dark.qa-accent-lavender{ --qa-brand:#b79cff; --qa-brand-hover:#9d80f2; }
+.qa-modal-overlay.qa-dark.qa-accent-orange  { --qa-brand:#ffb066; --qa-brand-hover:#e59243; }
+.qa-modal-overlay.qa-dark.qa-accent-red     { --qa-brand:#ff9d9d; --qa-brand-hover:#e57373; }
+
+.qa-modal{
+    background:var(--qa-surface);
+    border-radius:14px;
+    border:1px solid var(--qa-border);
+    box-shadow:0 20px 60px rgba(0,0,0,.35);
+    width:min(440px, 100%);
+    max-height:calc(100vh - 64px);
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+    transform:translateY(10px) scale(.98);
+    transition:transform .18s ease;
+}
+.qa-modal-overlay.qa-modal-open .qa-modal{
+    transform:translateY(0) scale(1);
+}
+.qa-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px;
+    border-bottom:1px solid var(--qa-border);
+}
+.qa-modal-title{
+    font-size:14px;
+    font-weight:600;
+    color:var(--qa-text);
+}
+.qa-modal-close{
+    background:transparent;
+    border:none;
+    color:var(--qa-muted);
+    width:28px;
+    height:28px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:6px;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease;
+}
+.qa-modal-close:hover{ background:var(--qa-surface-alt); color:var(--qa-text); }
+.qa-modal-close svg{ width:16px; height:16px; }
+.qa-modal-body{
+    padding:14px 16px;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+.qa-modal-lede{
+    margin:0;
+    font-size:12px;
+    line-height:1.5;
+    color:var(--qa-text);
+}
+.qa-modal-list{
+    list-style:none;
+    margin:0;
+    padding:8px 10px;
+    background:var(--qa-surface-alt);
+    border-radius:var(--qa-r-md);
+    max-height:180px;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    font-size:12px;
+}
+.qa-modal-list li{
+    display:flex;
+    gap:6px;
+    align-items:baseline;
+    line-height:1.4;
+}
+.qa-modal-list a{
+    color:var(--qa-brand);
+    text-decoration:none;
+    font-weight:600;
+    white-space:nowrap;
+    flex:0 0 auto;
+}
+.qa-modal-list a:hover{ text-decoration:underline; }
+.qa-modal-list-subject{
+    color:var(--qa-text);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    line-clamp:2;
+    -webkit-box-orient:vertical;
+    word-break:break-word;
+}
+.qa-modal-meta{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    font-size:12px;
+    color:var(--qa-text);
+}
+.qa-modal-meta-row{ line-height:1.5; }
+.qa-modal-note-label{ margin-top:2px; }
+.qa-modal-note{
+    background:var(--qa-surface-alt);
+    border:1px solid var(--qa-border);
+    border-radius:var(--qa-r-md);
+    padding:8px 10px;
+    margin:0;
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Code", monospace;
+    font-size:11.5px;
+    line-height:1.5;
+    color:var(--qa-text);
+    max-height:120px;
+    overflow-y:auto;
+    white-space:pre-wrap;
+    word-break:break-word;
+}
+.qa-modal-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:8px;
+    padding:12px 16px;
+    border-top:1px solid var(--qa-border);
+    background:var(--qa-surface-alt);
+}
+.qa-modal-actions .qa-btn{
+    min-width:auto;
+    padding:6px 14px;
+}
+
+@media (prefers-reduced-motion:reduce){
+    .qa-modal-overlay, .qa-modal{ transition:none; }
+}
+
 .qa-ai-chat{
     display:flex;
     flex-direction:column;

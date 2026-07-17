@@ -69,6 +69,13 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
   - **Close issue** — fills + auto-submits.
 - Both buttons stay disabled until a version is picked *and* the note has content.
 
+### 📈 Close many issues from the Agile board
+- New **"Close multiple issues"** section that appears in the panel on any `/projects/<x>/agile/board` page.
+- Click **Enter select mode** and every card on the board grows a small checkbox in its top-right corner — tick as many as you need.
+- Pick a **Closed Version** and edit the auto-generated note (same textarea + template as the single-issue close).
+- Click **Close N issues…** to open a themed confirmation modal listing every selected issue by ID and subject, the picked version, and the exact note that will be posted. Cancel any time; confirm to send one round-trip to Redmine's built-in `bulk_update` endpoint (session cookies + CSRF, no extra permissions).
+- On success the board reloads so the closed cards actually disappear.
+
 ### ⌨️ Keyboard-first workflow
 - <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>4</kbd> — open Web / Backend / iOS / Android New-issue form.
 - <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>…<kbd>4</kbd> — open the matching agile board.
@@ -160,6 +167,16 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a full history of what changed in e
   or **Close issue** (fills + submits in one click). Both buttons stay
   disabled until a version is picked and the note isn't empty. The section
   is hidden on the New-issue form and on `dev.cloudapper.com`.
+- **Close many issues at once from the Agile board** — On any
+  `/projects/<x>/agile/board` page a new *Close multiple issues* section
+  appears in the panel. Toggle **Enter select mode** to overlay a checkbox
+  on every board card, tick as many as you need, pick a **Closed Version**
+  and (optionally) tweak the auto-generated note. A themed confirmation
+  modal lists every selected issue with its ID + subject and previews the
+  exact note that will be posted, so nothing goes out without a full
+  review. Confirming POSTs to Redmine's built-in `bulk_update` endpoint
+  in a single round-trip (session cookies + CSRF, no extra permissions)
+  and reloads the board on success so the closed cards actually disappear.
 - **Toast notifications** — Small confirmations for every action.
 - **Floating, draggable panel** — Drag the panel anywhere on screen; its
   position is remembered.

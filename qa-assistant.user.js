@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      6.1.2
+// @version      6.2.0
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -241,6 +241,7 @@ As a <role>, I want <goal> so that <benefit>.
             bug:                  `<svg ${A}><path d="M9 5l1.5 2"/><path d="M15 5l-1.5 2"/><rect x="7" y="7" width="10" height="11" rx="5"/><path d="M12 8v9"/><path d="M7 11H4"/><path d="M7 14H4"/><path d="M6 17l1-1"/><path d="M17 11h3"/><path d="M17 14h3"/><path d="M18 17l-1-1"/></svg>`,
             star:                 `<svg ${A}><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`,
             "check-square":       `<svg ${A}><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`,
+            x:                    `<svg ${A}><path d="M18 6L6 18M6 6l12 12"/></svg>`,
             user:                 `<svg ${A}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
             flask:                `<svg ${A}><path d="M10 2v7.5L2.4 21.16A1 1 0 0 0 3.24 22.5h17.52a1 1 0 0 0 .84-1.34L14 9.5V2"/><path d="M8.5 2h7"/><path d="M6.5 15h11"/></svg>`,
             lightbulb:            `<svg ${A}><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14A5.5 5.5 0 0 0 12 4a5.5 5.5 0 0 0-3.09 10c1.19.86 1.09 1.72 1.09 4h4c0-2.28-.1-3.14 1.09-4z"/></svg>`,
@@ -770,6 +771,116 @@ As a <role>, I want <goal> so that <benefit>.
     }
 
     //////////////////////////////////////////////////////
+    // Bulk Close (Agile board)
+    //////////////////////////////////////////////////////
+
+    // True on a Redmine Agile plugin board page — the only surface where the
+    // "Bulk close" section makes sense (the panel needs cards to select).
+    function isAgileBoardPage() {
+        return /\/agile\/boards?\/?/.test(location.pathname);
+    }
+
+    // Every issue card currently rendered on the agile board. The Redmine
+    // Agile plugin has used a couple of different DOM shapes across versions,
+    // so we probe the common selectors and dedupe.
+    function getBoardCards() {
+        const nodes = document.querySelectorAll(".issue-card, .agile-issue, [data-id][data-project-id]");
+        const seen = new Set();
+        const out = [];
+        nodes.forEach(n => {
+            if (seen.has(n)) return;
+            seen.add(n);
+            out.push(n);
+        });
+        return out;
+    }
+
+    // Read the numeric issue id off a card element. Falls back to a numeric
+    // suffix on the DOM id (e.g. id="issue-1234") if no data attribute exists.
+    function cardIssueId(card) {
+        const d = card.getAttribute("data-id") || card.getAttribute("data-issue-id");
+        if (d) return d;
+        const m = (card.id || "").match(/(?:issue-)?(\d+)/);
+        return m ? m[1] : null;
+    }
+
+    // Best-effort card subject for the confirmation modal. Prefers the first
+    // /issues/<n> link's text; falls back to "#id" if the card has no link.
+    function cardSubject(card) {
+        const link = card.querySelector("a[href*='/issues/']");
+        if (link) {
+            const t = link.textContent.trim();
+            if (t) return t;
+        }
+        const id = cardIssueId(card);
+        return id ? ("#" + id) : "(unknown)";
+    }
+
+    // Ask Redmine to render the bulk-edit form for the picked issues, then
+    // scrape the CSRF token, the "Closed" status id, and the option list for
+    // the Closed Version custom field. We reuse Redmine's own dropdowns so
+    // whatever versions the user can normally pick on that project will show
+    // up here too — no client-side filtering to keep in sync.
+    async function fetchBulkEditContext(ids) {
+        if (!ids || !ids.length) return null;
+        const params = new URLSearchParams();
+        ids.forEach(id => params.append("ids[]", id));
+        const res = await fetch("/issues/bulk_edit?" + params.toString(), { credentials: "include" });
+        if (!res.ok) throw new Error("Couldn't load bulk-edit form (HTTP " + res.status + ")");
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+
+        const meta = doc.querySelector("meta[name='csrf-token']") || document.querySelector("meta[name='csrf-token']");
+        const csrf = meta ? meta.getAttribute("content") : null;
+        if (!csrf) throw new Error("Couldn't find the CSRF token — reload Redmine and try again");
+
+        const statusSel = doc.getElementById("issue_status_id");
+        let closedStatusId = null;
+        if (statusSel) {
+            const opt = Array.from(statusSel.querySelectorAll("option"))
+                .find(o => /closed/i.test(o.textContent.trim()));
+            if (opt) closedStatusId = opt.value;
+        }
+        if (!closedStatusId) throw new Error("Couldn't find a 'Closed' status on the bulk-edit form");
+
+        const cf = doc.getElementById("issue_custom_field_values_" + CLOSED_VERSION_CF_ID);
+        const versions = [];
+        if (cf) {
+            Array.from(cf.querySelectorAll("option")).forEach(o => {
+                if (o.value) versions.push({ value: o.value, label: o.textContent.trim() });
+            });
+        }
+
+        return { csrf, closedStatusId, versions };
+    }
+
+    // Submit the bulk_update form the same way Redmine's own "Edit" batch
+    // action does — application/x-www-form-urlencoded, CSRF in both header
+    // and body, same-origin cookies. Redmine responds with a 302 redirect
+    // on success; anything under 500 is treated as "probably ok" so a
+    // subsequent reload will show the true state.
+    async function postBulkUpdate({ ids, statusId, versionId, notes, csrf }) {
+        const params = new URLSearchParams();
+        params.append("authenticity_token", csrf);
+        ids.forEach(id => params.append("ids[]", id));
+        params.append("issue[status_id]", statusId);
+        if (versionId) params.append("issue[custom_field_values][" + CLOSED_VERSION_CF_ID + "]", versionId);
+        if (notes) params.append("notes", notes);
+        const res = await fetch("/issues/bulk_update", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-CSRF-Token": csrf,
+                "Accept": "text/html, application/xhtml+xml"
+            },
+            body: params.toString()
+        });
+        if (res.status >= 500) throw new Error("Bulk update failed (HTTP " + res.status + ")");
+        return true;
+    }
+
+    //////////////////////////////////////////////////////
     // Navigation
     //////////////////////////////////////////////////////
 
@@ -991,6 +1102,63 @@ As a <role>, I want <goal> so that <benefit>.
                     </div>
                 </div>` : "";
 
+        // "Close multiple issues" section — only rendered on Redmine, and only
+        // made visible on Agile board pages (populated at init). Enters a
+        // "select mode" that overlays a checkbox on every card so the user
+        // can pick multiple issues, then closes them all in one bulk_update
+        // POST after a confirmation modal.
+        const bulkCloseHtml = onRedmine ? `
+                <div class="qa-bulk-close-wrap" id="qa-bulk-close-wrap" hidden>
+                    <div class="qa-divider"></div>
+                    <div class="qa-section-label">Close multiple issues</div>
+                    <div class="qa-bulk-toggle-row">
+                        <button class="qa-btn qa-tmpl-btn qa-bulk-select-btn" data-action="bulk-select-toggle" type="button"><span class="qa-btn-icon">${svgIcon("check-square")}</span><span class="qa-btn-label" id="qa-bulk-select-label">Enter select mode</span></button>
+                        <span class="qa-bulk-count" id="qa-bulk-count" hidden>0 selected</span>
+                    </div>
+                    <div class="qa-bulk-fields" id="qa-bulk-fields" hidden>
+                        <label class="qa-ai-model-row">
+                            <span>Closed version</span>
+                            <select id="qa-bulk-version" class="qa-ai-field" disabled>
+                                <option value="">— loading versions —</option>
+                            </select>
+                        </label>
+                        <textarea id="qa-bulk-note" class="qa-close-note-input"
+                                  spellcheck="false" rows="2" disabled
+                                  placeholder="Pick a version above to preview the note. Edit before sending."></textarea>
+                        <div class="qa-template-actions">
+                            <button class="qa-btn qa-tmpl-btn" data-action="bulk-cancel" type="button" title="Leave select mode without closing anything"><span class="qa-btn-icon">${svgIcon("x")}</span><span class="qa-btn-label">Cancel</span></button>
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="bulk-submit" id="qa-bulk-submit" disabled type="button" title="Review the list, then confirm the bulk close"><span class="qa-btn-icon">${svgIcon("check-square")}</span><span class="qa-btn-label" id="qa-bulk-submit-label">Close…</span></button>
+                        </div>
+                    </div>
+                </div>` : "";
+
+        // Confirmation modal for the bulk close. Rendered inside the panel so
+        // it inherits theme + accent classes, then moved to document.body at
+        // wiring time (like #qa-accent-popover) so the panel's overflow:hidden
+        // and backdrop-filter don't clip its overlay.
+        const bulkModalHtml = onRedmine ? `
+                <div class="qa-modal-overlay" id="qa-bulk-modal" hidden role="dialog" aria-modal="true" aria-labelledby="qa-bulk-modal-title">
+                    <div class="qa-modal">
+                        <div class="qa-modal-header">
+                            <span class="qa-modal-title" id="qa-bulk-modal-title">Close issues?</span>
+                            <button class="qa-hbtn qa-modal-close" data-action="modal-cancel" type="button" title="Cancel">${svgIcon("x")}</button>
+                        </div>
+                        <div class="qa-modal-body">
+                            <p class="qa-modal-lede">These issues will be set to <strong>Closed</strong>, tagged with the picked version, and receive your note as a comment.</p>
+                            <ul class="qa-modal-list" id="qa-bulk-modal-list"></ul>
+                            <div class="qa-modal-meta">
+                                <div class="qa-modal-meta-row"><strong>Version:</strong> <span id="qa-bulk-modal-version">—</span></div>
+                                <div class="qa-modal-meta-row qa-modal-note-label"><strong>Note:</strong></div>
+                                <pre class="qa-modal-note" id="qa-bulk-modal-note"></pre>
+                            </div>
+                        </div>
+                        <div class="qa-modal-actions">
+                            <button class="qa-btn qa-tmpl-btn" data-action="modal-cancel" type="button"><span class="qa-btn-label">Cancel</span></button>
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="modal-confirm" type="button"><span class="qa-btn-icon">${svgIcon("check-square")}</span><span class="qa-btn-label" id="qa-bulk-modal-confirm-label">Close them</span></button>
+                        </div>
+                    </div>
+                </div>` : "";
+
         panel.innerHTML = `
             <div class="qa-header" id="qa-header">
                 <span class="qa-title"><span class="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
@@ -1019,6 +1187,7 @@ As a <role>, I want <goal> so that <benefit>.
                 <div class="qa-project-grid" id="qa-project-list" hidden>${projectButtons}</div>
                 ${templateHtml}
                 ${closeIssueHtml}
+                ${bulkCloseHtml}
                 <div class="qa-divider"></div>
                 <div class="qa-section-label">Agile Boards</div>
                 <div class="qa-boards-row" id="qa-boards-wrap">
@@ -1026,6 +1195,7 @@ As a <role>, I want <goal> so that <benefit>.
                 </div>
                 <div class="qa-version">${QA_VERSION ? "v" + QA_VERSION : ""}</div>
             </div>
+            ${bulkModalHtml}
         `;
 
         document.body.appendChild(panel);
@@ -1392,6 +1562,289 @@ As a <role>, I want <goal> so that <benefit>.
                     closeWrap.hidden = false;
                     updateCloseButtons();
                 }
+            }
+
+            // ---- Bulk close (Agile board) ----
+            // Wire the "Close multiple issues" section. All handlers are set
+            // up regardless of page, but the section stays hidden unless
+            // we're actually on an Agile board (checked at the bottom).
+            const bulkWrap        = panel.querySelector("#qa-bulk-close-wrap");
+            const bulkFields      = panel.querySelector("#qa-bulk-fields");
+            const bulkSelectBtn   = panel.querySelector('[data-action="bulk-select-toggle"]');
+            const bulkSelectLabel = panel.querySelector("#qa-bulk-select-label");
+            const bulkCancelBtn   = panel.querySelector('[data-action="bulk-cancel"]');
+            const bulkSubmitBtn   = panel.querySelector("#qa-bulk-submit");
+            const bulkSubmitLabel = panel.querySelector("#qa-bulk-submit-label");
+            const bulkVerSel      = panel.querySelector("#qa-bulk-version");
+            const bulkNote        = panel.querySelector("#qa-bulk-note");
+            const bulkCountEl     = panel.querySelector("#qa-bulk-count");
+            const bulkModal       = panel.querySelector("#qa-bulk-modal");
+            const bulkModalList   = bulkModal && bulkModal.querySelector("#qa-bulk-modal-list");
+            const bulkModalVer    = bulkModal && bulkModal.querySelector("#qa-bulk-modal-version");
+            const bulkModalNote   = bulkModal && bulkModal.querySelector("#qa-bulk-modal-note");
+            const bulkModalTitle  = bulkModal && bulkModal.querySelector("#qa-bulk-modal-title");
+            const bulkModalOkLbl  = bulkModal && bulkModal.querySelector("#qa-bulk-modal-confirm-label");
+            const bulkModalOkBtn  = bulkModal && bulkModal.querySelector('[data-action="modal-confirm"]');
+
+            // Move the modal out of #qa-panel so backdrop-filter + overflow
+            // don't clip the overlay (same trick as the accent popover).
+            if (bulkModal) document.body.appendChild(bulkModal);
+
+            // Keep the select + textarea out of the way of panel drag / global
+            // shortcut handlers, matching every other form control in the panel.
+            [bulkVerSel, bulkNote].forEach(el => {
+                if (!el) return;
+                el.addEventListener("mousedown", (e) => e.stopPropagation());
+                el.addEventListener("keydown",   (e) => e.stopPropagation());
+            });
+
+            let bulkSelecting  = false;
+            let bulkSelected   = new Set();  // Set<string> of picked issue IDs
+            let bulkCardCtx    = new Map();  // Map<id, { card, subject }>
+            let bulkContext    = null;       // { csrf, closedStatusId, versions }
+            let bulkCtxLoading = false;
+
+            function bulkProjectLabel() {
+                const key = projectKeyFromBodyClass();
+                return (PROJECTS[key] && PROJECTS[key].label) || "this project";
+            }
+
+            // Re-computes the count chip, submit button label + enabled state
+            // based on selected size + note + version. Called from every
+            // interaction that could affect any of the three.
+            function updateBulkCount() {
+                const n = bulkSelected.size;
+                bulkCountEl.hidden = n === 0;
+                bulkCountEl.textContent = n === 1 ? "1 selected" : (n + " selected");
+                const ready = n > 0 && !!bulkVerSel.value && bulkNote.value.trim().length > 0;
+                bulkSubmitBtn.disabled = !ready;
+                bulkSubmitLabel.textContent = n > 0 ? ("Close " + n + "…") : "Close…";
+                bulkFields.hidden = n === 0;
+            }
+
+            // Inject a checkbox overlay into a card and wire it to the shared
+            // selection Set. Cards are only marked with .qa-card-selected
+            // (via the checkbox change) — no visual chrome outside select mode.
+            function bulkMakeCheckbox(card, id) {
+                const cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.className = "qa-card-checkbox";
+                cb.setAttribute("data-qa-id", id);
+                // Cards on the agile board are draggable — stop mousedown
+                // reaching the drag handler so ticking a card doesn't start
+                // a drag.
+                cb.addEventListener("mousedown", (e) => e.stopPropagation());
+                cb.addEventListener("click", (e) => e.stopPropagation());
+                cb.addEventListener("change", () => {
+                    if (cb.checked) {
+                        bulkSelected.add(id);
+                        card.classList.add("qa-card-selected");
+                    } else {
+                        bulkSelected.delete(id);
+                        card.classList.remove("qa-card-selected");
+                    }
+                    updateBulkCount();
+                    ensureBulkContext();
+                });
+                return cb;
+            }
+
+            function bulkAttachCheckboxes() {
+                bulkCardCtx.clear();
+                getBoardCards().forEach(card => {
+                    const id = cardIssueId(card);
+                    if (!id) return;
+                    if (card.querySelector(".qa-card-checkbox")) return;
+                    bulkCardCtx.set(id, { card, subject: cardSubject(card) });
+                    card.appendChild(bulkMakeCheckbox(card, id));
+                });
+            }
+
+            function bulkDetachCheckboxes() {
+                document.querySelectorAll(".qa-card-checkbox").forEach(el => el.remove());
+                document.querySelectorAll(".qa-card-selected").forEach(el =>
+                    el.classList.remove("qa-card-selected"));
+            }
+
+            function exitBulkSelect() {
+                bulkSelecting = false;
+                document.body.classList.remove("qa-selecting");
+                bulkSelectBtn.classList.remove("qa-active");
+                bulkSelectLabel.textContent = "Enter select mode";
+                bulkDetachCheckboxes();
+                bulkSelected.clear();
+                bulkCardCtx.clear();
+                bulkFields.hidden = true;
+                bulkCountEl.hidden = true;
+                bulkNote.value = "";
+                bulkNote.disabled = true;
+                bulkVerSel.value = "";
+                updateBulkCount();
+            }
+
+            function enterBulkSelect() {
+                bulkSelecting = true;
+                document.body.classList.add("qa-selecting");
+                bulkSelectBtn.classList.add("qa-active");
+                bulkSelectLabel.textContent = "Exit select mode";
+                bulkAttachCheckboxes();
+                bulkFields.hidden = false;
+                updateBulkCount();
+                ensureBulkContext();
+            }
+
+            // On version change, regenerate the default note from the standard
+            // template (same buildCloseNote helper the single-issue close uses)
+            // so the user sees a fresh baseline. They can edit freely afterwards.
+            function refreshBulkNote() {
+                const opt = bulkVerSel.options[bulkVerSel.selectedIndex];
+                const versionLabel = (opt && opt.value) ? opt.text : "";
+                const projectKey = projectKeyFromBodyClass();
+                if (versionLabel) {
+                    bulkNote.value = buildCloseNote(projectKey, versionLabel);
+                    bulkNote.disabled = false;
+                } else {
+                    bulkNote.value = "";
+                    bulkNote.disabled = true;
+                }
+                updateBulkCount();
+            }
+
+            function bulkPopulateVersionSelect(versions) {
+                bulkVerSel.innerHTML = '<option value="">— pick a version —</option>';
+                versions.forEach(v => {
+                    const opt = document.createElement("option");
+                    opt.value = v.value;
+                    opt.textContent = v.label;
+                    bulkVerSel.appendChild(opt);
+                });
+                bulkVerSel.disabled = false;
+            }
+
+            // Lazily fetch the bulk-edit form on first tick so we don't hit
+            // Redmine unless the user actually starts selecting. Cached for
+            // the lifetime of the page (versions are project-wide).
+            function ensureBulkContext() {
+                if (bulkContext || bulkCtxLoading) return;
+                const anyId = Array.from(bulkCardCtx.keys())[0]
+                    || getBoardCards().map(cardIssueId).find(Boolean);
+                if (!anyId) return;
+                bulkCtxLoading = true;
+                fetchBulkEditContext([anyId])
+                    .then(ctx => {
+                        bulkContext = ctx;
+                        bulkPopulateVersionSelect(ctx.versions);
+                    })
+                    .catch(err => {
+                        toast(err.message || "Couldn't load bulk-edit form");
+                    })
+                    .finally(() => { bulkCtxLoading = false; });
+            }
+
+            bulkVerSel.addEventListener("change", refreshBulkNote);
+            bulkNote.addEventListener("input", updateBulkCount);
+
+            bulkSelectBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                if (bulkSelecting) exitBulkSelect(); else enterBulkSelect();
+            });
+
+            bulkCancelBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                exitBulkSelect();
+            });
+
+            function openBulkModal() {
+                if (!bulkModal) return;
+                const ids = Array.from(bulkSelected);
+                if (!ids.length) return;
+                if (!bulkContext || !bulkContext.closedStatusId) {
+                    toast("Still loading bulk-edit form — try again in a moment");
+                    ensureBulkContext();
+                    return;
+                }
+                const opt = bulkVerSel.options[bulkVerSel.selectedIndex];
+                const versionLabel = (opt && opt.value) ? opt.text : "(none)";
+                bulkModalTitle.textContent = "Close " + ids.length + " issue" + (ids.length === 1 ? "" : "s") + " in " + bulkProjectLabel() + "?";
+                bulkModalOkLbl.textContent = "Close " + ids.length + " issue" + (ids.length === 1 ? "" : "s");
+                bulkModalVer.textContent = versionLabel;
+                bulkModalNote.textContent = bulkNote.value;
+                bulkModalList.innerHTML = "";
+                ids.forEach(id => {
+                    const ctx = bulkCardCtx.get(id);
+                    const li = document.createElement("li");
+                    const a = document.createElement("a");
+                    a.href = REDMINE + "/issues/" + id;
+                    a.target = "_blank";
+                    a.rel = "noopener";
+                    a.textContent = "#" + id;
+                    const sub = document.createElement("span");
+                    sub.className = "qa-modal-list-subject";
+                    sub.textContent = " " + (ctx ? ctx.subject : "");
+                    li.appendChild(a);
+                    li.appendChild(sub);
+                    bulkModalList.appendChild(li);
+                });
+                // Mirror panel theme + accent classes onto the modal so it
+                // picks up the same tokens (mirrors the accent-popover trick).
+                bulkModal.className = "qa-modal-overlay";
+                if (panel.classList.contains("qa-dark")) bulkModal.classList.add("qa-dark");
+                Array.from(panel.classList).forEach(c => {
+                    if (c.indexOf("qa-accent-") === 0) bulkModal.classList.add(c);
+                });
+                bulkModal.hidden = false;
+                if (bulkModalOkBtn) bulkModalOkBtn.disabled = false;
+                requestAnimationFrame(() => bulkModal.classList.add("qa-modal-open"));
+            }
+
+            function closeBulkModal() {
+                if (!bulkModal) return;
+                bulkModal.classList.remove("qa-modal-open");
+                setTimeout(() => { bulkModal.hidden = true; }, 180);
+            }
+
+            bulkSubmitBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                openBulkModal();
+            });
+
+            if (bulkModal) {
+                // Click on the overlay backdrop (not the modal card) closes.
+                bulkModal.addEventListener("click", (e) => {
+                    if (e.target === bulkModal) closeBulkModal();
+                });
+                bulkModal.querySelectorAll('[data-action="modal-cancel"]').forEach(b =>
+                    b.addEventListener("click", (e) => { e.stopPropagation(); closeBulkModal(); }));
+                if (bulkModalOkBtn) {
+                    bulkModalOkBtn.addEventListener("click", async (e) => {
+                        e.stopPropagation();
+                        const ids = Array.from(bulkSelected);
+                        if (!ids.length || !bulkContext) return;
+                        bulkModalOkBtn.disabled = true;
+                        try {
+                            await postBulkUpdate({
+                                ids,
+                                statusId: bulkContext.closedStatusId,
+                                versionId: bulkVerSel.value,
+                                notes: bulkNote.value,
+                                csrf: bulkContext.csrf
+                            });
+                            toast("Closing " + ids.length + " issue" + (ids.length === 1 ? "" : "s") + "…");
+                            // Give Redmine a beat to finish, then reload so
+                            // the closed cards actually disappear from the board.
+                            setTimeout(() => location.reload(), 400);
+                        } catch (err) {
+                            toast(err.message || "Bulk update failed");
+                            bulkModalOkBtn.disabled = false;
+                        }
+                    });
+                }
+            }
+
+            // Only reveal on Agile board pages — everywhere else the section
+            // makes no sense (no cards to select).
+            if (isAgileBoardPage()) {
+                bulkWrap.hidden = false;
             }
         }
 
@@ -3126,6 +3579,255 @@ As a <role>, I want <goal> so that <benefit>.
     color:var(--qa-muted);
     font-style:italic;
     font-family:inherit;
+}
+
+/* ---------- Bulk close (Agile board) ----------
+   Renders below the single-issue close section on any Redmine page but only
+   becomes visible on /projects/<x>/agile/board pages. Reuses the panel's
+   accent + surface tokens so it themes for free; the only bespoke visuals
+   are the count chip, the card checkbox overlays, and the confirmation
+   modal (which needs its own tokens because it's detached to <body>). */
+.qa-bulk-close-wrap[hidden]{ display:none; }
+.qa-bulk-close-wrap .qa-ai-model-row{ margin-top:2px; margin-bottom:6px; }
+.qa-bulk-fields[hidden]{ display:none; }
+
+.qa-bulk-toggle-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:8px;
+}
+.qa-bulk-select-btn{ flex:1 1 auto; }
+.qa-bulk-select-btn.qa-active{
+    background:var(--qa-brand-tint);
+    border-color:var(--qa-brand);
+    color:var(--qa-brand-strong);
+}
+.qa-bulk-count{
+    flex:0 0 auto;
+    padding:4px 10px;
+    border-radius:999px;
+    background:var(--qa-brand-tint);
+    color:var(--qa-brand-strong);
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:.2px;
+    white-space:nowrap;
+}
+.qa-bulk-count[hidden]{ display:none; }
+
+/* Card selection overlay: while body.qa-selecting is on, every agile-board
+   card gets a small checkbox in its top-right corner. */
+body.qa-selecting .issue-card,
+body.qa-selecting .agile-issue{
+    position:relative;
+}
+.qa-card-checkbox{
+    position:absolute;
+    top:6px;
+    right:6px;
+    width:16px;
+    height:16px;
+    margin:0;
+    cursor:pointer;
+    z-index:20;
+    accent-color:#4a9eff;
+    box-shadow:0 1px 4px rgba(0,0,0,.25);
+    background:#fff;
+    border-radius:3px;
+}
+.qa-card-selected{
+    outline:2px solid #4a9eff !important;
+    outline-offset:-2px;
+    box-shadow:0 0 0 3px rgba(74,158,255,.25) !important;
+}
+
+/* ---------- Confirmation modal ----------
+   Lives directly under <body> (moved out of #qa-panel at wiring time). */
+.qa-modal-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(15,20,30,.55);
+    backdrop-filter:blur(3px);
+    -webkit-backdrop-filter:blur(3px);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:32px 16px;
+    z-index:2147483646;
+    opacity:0;
+    transition:opacity .18s ease;
+    --qa-brand:            #1f6feb;
+    --qa-brand-hover:      #175bb5;
+    --qa-brand-strong:     #0d1f3d;
+    --qa-brand-tint:       #e3ecfb;
+    --qa-brand-active-bg:  #d8e6fb;
+    --qa-brand-focus-ring: rgba(31,111,235,.22);
+    --qa-text:             #23272f;
+    --qa-muted:            #6b7280;
+    --qa-border:           #d7dae0;
+    --qa-surface:          #ffffff;
+    --qa-surface-alt:      #f4f6fa;
+    --qa-r-md:             10px;
+    --qa-on-brand:         #ffffff;
+    color:var(--qa-text);
+    font-family:"Inter", "SF Pro Text", "SF Pro", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+.qa-modal-overlay[hidden]{ display:none; }
+.qa-modal-overlay.qa-modal-open{ opacity:1; }
+
+.qa-modal-overlay.qa-dark{
+    --qa-brand:            #4a9eff;
+    --qa-brand-hover:      #3a8ae8;
+    --qa-brand-strong:     #cfe4ff;
+    --qa-brand-tint:       #33445a;
+    --qa-brand-active-bg:  #1e3a5f;
+    --qa-brand-focus-ring: rgba(74,158,255,.22);
+    --qa-text:             #e4e7eb;
+    --qa-muted:            #9aa5b1;
+    --qa-border:           #40495a;
+    --qa-surface:          #1a2130;
+    --qa-surface-alt:      #232b3b;
+}
+.qa-modal-overlay.qa-accent-lavender{ --qa-brand:#7b3fe4; --qa-brand-hover:#6935cf; }
+.qa-modal-overlay.qa-accent-orange  { --qa-brand:#e67e22; --qa-brand-hover:#c76914; }
+.qa-modal-overlay.qa-accent-red     { --qa-brand:#e57373; --qa-brand-hover:#cc5a5a; }
+.qa-modal-overlay.qa-dark.qa-accent-lavender{ --qa-brand:#b79cff; --qa-brand-hover:#9d80f2; }
+.qa-modal-overlay.qa-dark.qa-accent-orange  { --qa-brand:#ffb066; --qa-brand-hover:#e59243; }
+.qa-modal-overlay.qa-dark.qa-accent-red     { --qa-brand:#ff9d9d; --qa-brand-hover:#e57373; }
+
+.qa-modal{
+    background:var(--qa-surface);
+    border-radius:14px;
+    border:1px solid var(--qa-border);
+    box-shadow:0 20px 60px rgba(0,0,0,.35);
+    width:min(440px, 100%);
+    max-height:calc(100vh - 64px);
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+    transform:translateY(10px) scale(.98);
+    transition:transform .18s ease;
+}
+.qa-modal-overlay.qa-modal-open .qa-modal{
+    transform:translateY(0) scale(1);
+}
+.qa-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px;
+    border-bottom:1px solid var(--qa-border);
+}
+.qa-modal-title{
+    font-size:14px;
+    font-weight:600;
+    color:var(--qa-text);
+}
+.qa-modal-close{
+    background:transparent;
+    border:none;
+    color:var(--qa-muted);
+    width:28px;
+    height:28px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:6px;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease;
+}
+.qa-modal-close:hover{ background:var(--qa-surface-alt); color:var(--qa-text); }
+.qa-modal-close svg{ width:16px; height:16px; }
+.qa-modal-body{
+    padding:14px 16px;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+.qa-modal-lede{
+    margin:0;
+    font-size:12px;
+    line-height:1.5;
+    color:var(--qa-text);
+}
+.qa-modal-list{
+    list-style:none;
+    margin:0;
+    padding:8px 10px;
+    background:var(--qa-surface-alt);
+    border-radius:var(--qa-r-md);
+    max-height:180px;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    font-size:12px;
+}
+.qa-modal-list li{
+    display:flex;
+    gap:6px;
+    align-items:baseline;
+    line-height:1.4;
+}
+.qa-modal-list a{
+    color:var(--qa-brand);
+    text-decoration:none;
+    font-weight:600;
+    white-space:nowrap;
+    flex:0 0 auto;
+}
+.qa-modal-list a:hover{ text-decoration:underline; }
+.qa-modal-list-subject{
+    color:var(--qa-text);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    line-clamp:2;
+    -webkit-box-orient:vertical;
+    word-break:break-word;
+}
+.qa-modal-meta{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    font-size:12px;
+    color:var(--qa-text);
+}
+.qa-modal-meta-row{ line-height:1.5; }
+.qa-modal-note-label{ margin-top:2px; }
+.qa-modal-note{
+    background:var(--qa-surface-alt);
+    border:1px solid var(--qa-border);
+    border-radius:var(--qa-r-md);
+    padding:8px 10px;
+    margin:0;
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Code", monospace;
+    font-size:11.5px;
+    line-height:1.5;
+    color:var(--qa-text);
+    max-height:120px;
+    overflow-y:auto;
+    white-space:pre-wrap;
+    word-break:break-word;
+}
+.qa-modal-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:8px;
+    padding:12px 16px;
+    border-top:1px solid var(--qa-border);
+    background:var(--qa-surface-alt);
+}
+.qa-modal-actions .qa-btn{
+    min-width:auto;
+    padding:6px 14px;
+}
+
+@media (prefers-reduced-motion:reduce){
+    .qa-modal-overlay, .qa-modal{ transition:none; }
 }
 
 .qa-ai-chat{

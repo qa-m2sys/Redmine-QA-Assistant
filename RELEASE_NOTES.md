@@ -5,7 +5,38 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.1.2 — current
+## Version 6.2.0 — current
+
+### Bulk close from the Agile board
+- 📈 **Close many issues at once, right from the board.** A new
+  *Close multiple issues* section appears in the panel on any
+  `/projects/<x>/agile/board` page. Click **Enter select mode** and
+  every card on the board grows a small checkbox in its top-right
+  corner — tick as many as you need, then close them all in one
+  round-trip to Redmine.
+- 🏷️ **Same closed-version + note flow as the single-issue close.**
+  Pick a closed version from the dropdown and the note textarea
+  auto-fills with the standard project template. Edit the wording
+  freely; whatever's in the textarea is what every closed issue will
+  receive as a comment.
+- 🧾 **Custom confirmation modal.** Clicking *Close N issues…* opens
+  a themed modal that lists every ticked issue by ID and subject,
+  shows the picked version and the exact note that will be posted,
+  and offers *Cancel* / *Close them* buttons. No irreversible clicks
+  without a full preview.
+- 🔌 **Uses Redmine's own bulk-update endpoint.** The panel POSTs to
+  `/issues/bulk_update` with the same fields Redmine's built-in *Edit*
+  batch action uses (status, closed-version custom field, note),
+  authenticating with the page's session cookies + CSRF token. No
+  extra permissions or API keys required.
+- 🔄 **Reloads the board on success** so the closed cards actually
+  disappear — no stale UI.
+- 🎨 The modal picks up the panel's dark-mode + accent-colour theme
+  automatically.
+
+---
+
+## Version 6.1.2
 
 ### Description Source narrowed to the New-issue page
 - 🎯 **Section only shows where it actually works.** The
