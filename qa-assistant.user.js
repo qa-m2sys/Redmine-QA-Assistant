@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      6.2.0
+// @version      6.2.1
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -816,6 +816,36 @@ As a <role>, I want <goal> so that <benefit>.
         return id ? ("#" + id) : "(unknown)";
     }
 
+    // Walk up from a card to its owning status column and read the numeric
+    // status id off `td.issue-status-col[data-id]`. Returns null when the
+    // Agile board markup is unexpected (defensive; caller treats null as
+    // "unknown" and skips the workflow probe).
+    function cardCurrentStatusId(card) {
+        let el = card;
+        while (el && el !== document.body) {
+            if (el.matches && el.matches("td.issue-status-col[data-id]")) {
+                return el.getAttribute("data-id");
+            }
+            el = el.parentElement;
+        }
+        return null;
+    }
+
+    // Ask Redmine's bulk-edit form (scoped to a single representative issue)
+    // whether "Closed" is one of the workflow-legal transitions from that
+    // issue's current status. We do this per-status rather than per-issue so
+    // one probe covers every card sitting in the same column.
+    async function probeCloseTransition(representativeIssueId, closedStatusId) {
+        if (!representativeIssueId || !closedStatusId) return true;
+        const res = await fetch("/issues/bulk_edit?ids[]=" + encodeURIComponent(representativeIssueId), { credentials: "include" });
+        if (!res.ok) return true; // be optimistic — Redmine will silently skip anyway
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const sel = doc.querySelector("#issue_status_id");
+        if (!sel) return true;
+        return !!sel.querySelector('option[value="' + closedStatusId + '"]');
+    }
+
     // Ask Redmine to render the bulk-edit form for the picked issues, then
     // scrape the CSRF token, the "Closed" status id, and the option list for
     // the Closed Version custom field. We reuse Redmine's own dropdowns so
@@ -834,14 +864,26 @@ As a <role>, I want <goal> so that <benefit>.
         const csrf = meta ? meta.getAttribute("content") : null;
         if (!csrf) throw new Error("Couldn't find the CSRF token — reload Redmine and try again");
 
-        const statusSel = doc.getElementById("issue_status_id");
+        // Locate the numeric id of the "Closed" status. Redmine renders
+        // only workflow-valid transitions in the bulk-edit dropdown, so if
+        // any selected issue is in a state that can't jump directly to
+        // "Closed" (very common on "New" cards), the option is absent.
+        // Fall back to the Agile plugin's own column headers, which always
+        // render `<th data-column-id="5">Closed (245)</th>` for the closed
+        // column regardless of workflow.
         let closedStatusId = null;
+        const statusSel = doc.getElementById("issue_status_id");
         if (statusSel) {
             const opt = Array.from(statusSel.querySelectorAll("option"))
-                .find(o => /closed/i.test(o.textContent.trim()));
+                .find(o => /(?:^|\W)closed(?:\W|$)/i.test(o.textContent.trim()));
             if (opt) closedStatusId = opt.value;
         }
-        if (!closedStatusId) throw new Error("Couldn't find a 'Closed' status on the bulk-edit form");
+        if (!closedStatusId) {
+            const th = Array.from(document.querySelectorAll("th[data-column-id]"))
+                .find(t => /(?:^|\W)closed(?:\W|$)/i.test(t.textContent.trim()));
+            if (th) closedStatusId = th.getAttribute("data-column-id");
+        }
+        if (!closedStatusId) throw new Error("Couldn't find a 'Closed' status");
 
         const cf = doc.getElementById("issue_custom_field_values_" + CLOSED_VERSION_CF_ID);
         const versions = [];
@@ -1146,6 +1188,7 @@ As a <role>, I want <goal> so that <benefit>.
                         <div class="qa-modal-body">
                             <p class="qa-modal-lede">These issues will be set to <strong>Closed</strong>, tagged with the picked version, and receive your note as a comment.</p>
                             <ul class="qa-modal-list" id="qa-bulk-modal-list"></ul>
+                            <div class="qa-modal-summary" id="qa-bulk-modal-summary" hidden></div>
                             <div class="qa-modal-meta">
                                 <div class="qa-modal-meta-row"><strong>Version:</strong> <span id="qa-bulk-modal-version">—</span></div>
                                 <div class="qa-modal-meta-row qa-modal-note-label"><strong>Note:</strong></div>
@@ -1580,6 +1623,7 @@ As a <role>, I want <goal> so that <benefit>.
             const bulkCountEl     = panel.querySelector("#qa-bulk-count");
             const bulkModal       = panel.querySelector("#qa-bulk-modal");
             const bulkModalList   = bulkModal && bulkModal.querySelector("#qa-bulk-modal-list");
+            const bulkModalSummary= bulkModal && bulkModal.querySelector("#qa-bulk-modal-summary");
             const bulkModalVer    = bulkModal && bulkModal.querySelector("#qa-bulk-modal-version");
             const bulkModalNote   = bulkModal && bulkModal.querySelector("#qa-bulk-modal-note");
             const bulkModalTitle  = bulkModal && bulkModal.querySelector("#qa-bulk-modal-title");
@@ -1600,9 +1644,20 @@ As a <role>, I want <goal> so that <benefit>.
 
             let bulkSelecting  = false;
             let bulkSelected   = new Set();  // Set<string> of picked issue IDs
-            let bulkCardCtx    = new Map();  // Map<id, { card, subject }>
+            let bulkCardCtx    = new Map();  // Map<id, { card, subject, statusId }>
             let bulkContext    = null;       // { csrf, closedStatusId, versions }
             let bulkCtxLoading = false;
+            // Workflow-probe cache keyed by current status id. Value is either
+            // a boolean (probe finished: true = "Closed" is a legal transition)
+            // or a Promise<boolean> (probe still in flight). Populated lazily
+            // as cards are ticked so openBulkModal() usually has answers ready.
+            let bulkWorkflowOk = new Map();
+            let bulkWillCloseIds = [];       // Ids the POST will actually send
+
+            // Ids to POST are computed at modal-open time (excludes cards that
+            // are already Closed and cards whose current status has no direct
+            // "Closed" transition).
+
 
             function bulkProjectLabel() {
                 const key = projectKeyFromBodyClass();
@@ -1639,6 +1694,11 @@ As a <role>, I want <goal> so that <benefit>.
                     if (cb.checked) {
                         bulkSelected.add(id);
                         card.classList.add("qa-card-selected");
+                        // Kick off a workflow probe for this card's current
+                        // status so the confirmation modal can render badges
+                        // without a spinner in the common case.
+                        const ctx = bulkCardCtx.get(id);
+                        if (ctx && ctx.statusId) primeWorkflowProbe(ctx.statusId, id);
                     } else {
                         bulkSelected.delete(id);
                         card.classList.remove("qa-card-selected");
@@ -1655,7 +1715,11 @@ As a <role>, I want <goal> so that <benefit>.
                     const id = cardIssueId(card);
                     if (!id) return;
                     if (card.querySelector(".qa-card-checkbox")) return;
-                    bulkCardCtx.set(id, { card, subject: cardSubject(card) });
+                    bulkCardCtx.set(id, {
+                        card,
+                        subject: cardSubject(card),
+                        statusId: cardCurrentStatusId(card)
+                    });
                     card.appendChild(bulkMakeCheckbox(card, id));
                 });
             }
@@ -1674,6 +1738,8 @@ As a <role>, I want <goal> so that <benefit>.
                 bulkDetachCheckboxes();
                 bulkSelected.clear();
                 bulkCardCtx.clear();
+                bulkWorkflowOk.clear();
+                bulkWillCloseIds = [];
                 bulkFields.hidden = true;
                 bulkCountEl.hidden = true;
                 bulkNote.value = "";
@@ -1741,6 +1807,37 @@ As a <role>, I want <goal> so that <benefit>.
                     .finally(() => { bulkCtxLoading = false; });
             }
 
+            // Fire-and-cache a workflow probe for one current-status id.
+            // Uses `representativeIssueId` (any selected card sitting in that
+            // status) to ask Redmine whether "Closed" is a legal transition.
+            // Cards already in the closed column resolve trivially to
+            // "already-closed" and are skipped from the POST.
+            function primeWorkflowProbe(statusId, representativeIssueId) {
+                if (!statusId) return;
+                if (bulkWorkflowOk.has(statusId)) return;
+                if (!bulkContext || !bulkContext.closedStatusId) {
+                    // Context not ready yet — openBulkModal will re-prime
+                    // once the form has loaded.
+                    return;
+                }
+                if (String(statusId) === String(bulkContext.closedStatusId)) {
+                    bulkWorkflowOk.set(statusId, "already-closed");
+                    return;
+                }
+                const p = probeCloseTransition(representativeIssueId, bulkContext.closedStatusId)
+                    .then(ok => {
+                        bulkWorkflowOk.set(statusId, !!ok);
+                        return !!ok;
+                    })
+                    .catch(() => {
+                        // On probe failure be optimistic — Redmine will still
+                        // silently skip anything it refuses to update.
+                        bulkWorkflowOk.set(statusId, true);
+                        return true;
+                    });
+                bulkWorkflowOk.set(statusId, p);
+            }
+
             bulkVerSel.addEventListener("change", refreshBulkNote);
             bulkNote.addEventListener("input", updateBulkCount);
 
@@ -1754,7 +1851,7 @@ As a <role>, I want <goal> so that <benefit>.
                 exitBulkSelect();
             });
 
-            function openBulkModal() {
+            async function openBulkModal() {
                 if (!bulkModal) return;
                 const ids = Array.from(bulkSelected);
                 if (!ids.length) return;
@@ -1765,12 +1862,62 @@ As a <role>, I want <goal> so that <benefit>.
                 }
                 const opt = bulkVerSel.options[bulkVerSel.selectedIndex];
                 const versionLabel = (opt && opt.value) ? opt.text : "(none)";
+
+                // Mirror panel theme + accent classes onto the modal so it
+                // picks up the same tokens (mirrors the accent-popover trick).
+                bulkModal.className = "qa-modal-overlay";
+                if (panel.classList.contains("qa-dark")) bulkModal.classList.add("qa-dark");
+                Array.from(panel.classList).forEach(c => {
+                    if (c.indexOf("qa-accent-") === 0) bulkModal.classList.add(c);
+                });
+
+                // Reveal the modal in a "checking workflow…" state while we
+                // wait for any outstanding probes so the user always sees the
+                // dialog immediately, not a delay-then-appear.
                 bulkModalTitle.textContent = "Close " + ids.length + " issue" + (ids.length === 1 ? "" : "s") + " in " + bulkProjectLabel() + "?";
-                bulkModalOkLbl.textContent = "Close " + ids.length + " issue" + (ids.length === 1 ? "" : "s");
+                bulkModalOkLbl.textContent = "Checking\u2026";
+                if (bulkModalOkBtn) bulkModalOkBtn.disabled = true;
                 bulkModalVer.textContent = versionLabel;
                 bulkModalNote.textContent = bulkNote.value;
                 bulkModalList.innerHTML = "";
+                if (bulkModalSummary) {
+                    bulkModalSummary.hidden = false;
+                    bulkModalSummary.className = "qa-modal-summary qa-modal-summary-checking";
+                    bulkModalSummary.textContent = "Checking Redmine's workflow rules\u2026";
+                }
+                bulkModal.hidden = false;
+                requestAnimationFrame(() => bulkModal.classList.add("qa-modal-open"));
+
+                // Kick off any missing probes now, then await everything.
                 ids.forEach(id => {
+                    const ctx = bulkCardCtx.get(id);
+                    if (ctx && ctx.statusId) primeWorkflowProbe(ctx.statusId, id);
+                });
+                const pending = ids.map(id => {
+                    const ctx = bulkCardCtx.get(id);
+                    const v = ctx ? bulkWorkflowOk.get(ctx.statusId) : true;
+                    return (v && typeof v.then === "function") ? v : Promise.resolve(v);
+                });
+                try { await Promise.all(pending); } catch (_) { /* handled per-probe */ }
+
+                // Categorise every selected id and build the final POST list.
+                const willClose = [];
+                const alreadyClosed = [];
+                const blocked = [];
+                ids.forEach(id => {
+                    const ctx = bulkCardCtx.get(id);
+                    const v = ctx ? bulkWorkflowOk.get(ctx.statusId) : true;
+                    if (v === "already-closed") alreadyClosed.push(id);
+                    else if (v === false)       blocked.push(id);
+                    else                        willClose.push(id);
+                });
+                bulkWillCloseIds = willClose;
+
+                // Render the list with per-row badges. Ordering: will-close
+                // first (the action), then already-closed, then blocked.
+                bulkModalList.innerHTML = "";
+                const ordered = willClose.concat(alreadyClosed).concat(blocked);
+                ordered.forEach(id => {
                     const ctx = bulkCardCtx.get(id);
                     const li = document.createElement("li");
                     const a = document.createElement("a");
@@ -1783,18 +1930,43 @@ As a <role>, I want <goal> so that <benefit>.
                     sub.textContent = " " + (ctx ? ctx.subject : "");
                     li.appendChild(a);
                     li.appendChild(sub);
+                    if (alreadyClosed.indexOf(id) !== -1) {
+                        li.classList.add("qa-modal-list-skip");
+                        const badge = document.createElement("span");
+                        badge.className = "qa-modal-badge qa-modal-badge-noop";
+                        badge.textContent = "already closed";
+                        li.appendChild(badge);
+                    } else if (blocked.indexOf(id) !== -1) {
+                        li.classList.add("qa-modal-list-skip");
+                        const badge = document.createElement("span");
+                        badge.className = "qa-modal-badge qa-modal-badge-warn";
+                        badge.textContent = "workflow blocks";
+                        badge.title = "Redmine's workflow doesn't allow a direct transition to Closed from this status. Change the status manually first, or move the card through the intermediate columns.";
+                        li.appendChild(badge);
+                    }
                     bulkModalList.appendChild(li);
                 });
-                // Mirror panel theme + accent classes onto the modal so it
-                // picks up the same tokens (mirrors the accent-popover trick).
-                bulkModal.className = "qa-modal-overlay";
-                if (panel.classList.contains("qa-dark")) bulkModal.classList.add("qa-dark");
-                Array.from(panel.classList).forEach(c => {
-                    if (c.indexOf("qa-accent-") === 0) bulkModal.classList.add(c);
-                });
-                bulkModal.hidden = false;
-                if (bulkModalOkBtn) bulkModalOkBtn.disabled = false;
-                requestAnimationFrame(() => bulkModal.classList.add("qa-modal-open"));
+
+                // Summary line + button state.
+                const parts = [];
+                parts.push(willClose.length + " will close");
+                if (alreadyClosed.length) parts.push(alreadyClosed.length + " already closed");
+                if (blocked.length) parts.push(blocked.length + " blocked by workflow");
+                if (bulkModalSummary) {
+                    bulkModalSummary.hidden = false;
+                    bulkModalSummary.className = "qa-modal-summary" + (blocked.length ? " qa-modal-summary-warn" : "");
+                    bulkModalSummary.textContent = parts.join(" \u00b7 ");
+                }
+
+                if (willClose.length) {
+                    bulkModalOkLbl.textContent = "Close " + willClose.length + " issue" + (willClose.length === 1 ? "" : "s");
+                    if (bulkModalOkBtn) bulkModalOkBtn.disabled = false;
+                } else {
+                    // Nothing can be closed — leave the button disabled and
+                    // relabel so the user knows why the modal is useless.
+                    bulkModalOkLbl.textContent = "Nothing to close";
+                    if (bulkModalOkBtn) bulkModalOkBtn.disabled = true;
+                }
             }
 
             function closeBulkModal() {
@@ -1818,7 +1990,11 @@ As a <role>, I want <goal> so that <benefit>.
                 if (bulkModalOkBtn) {
                     bulkModalOkBtn.addEventListener("click", async (e) => {
                         e.stopPropagation();
-                        const ids = Array.from(bulkSelected);
+                        // Send only cards the pre-flight cleared — Redmine
+                        // would silently skip the rest anyway, and this way
+                        // the toast + reload numbers match what the user
+                        // confirmed in the modal.
+                        const ids = bulkWillCloseIds.slice();
                         if (!ids.length || !bulkContext) return;
                         bulkModalOkBtn.disabled = true;
                         try {
@@ -3788,6 +3964,56 @@ body.qa-selecting .agile-issue{
     line-clamp:2;
     -webkit-box-orient:vertical;
     word-break:break-word;
+    flex:1 1 auto;
+}
+.qa-modal-list-skip{ opacity:.6; }
+.qa-modal-list-skip .qa-modal-list-subject{ text-decoration:line-through; }
+.qa-modal-badge{
+    margin-left:auto;
+    padding:1px 7px;
+    border-radius:999px;
+    font-size:10px;
+    font-weight:600;
+    letter-spacing:.2px;
+    white-space:nowrap;
+    flex:0 0 auto;
+    align-self:center;
+}
+.qa-modal-badge-noop{
+    background:var(--qa-surface);
+    color:var(--qa-muted);
+    border:1px solid var(--qa-border);
+}
+.qa-modal-badge-warn{
+    background:#fff3cd;
+    color:#8a5a00;
+    border:1px solid #f0d47a;
+}
+.qa-modal-overlay.qa-dark .qa-modal-badge-warn{
+    background:#4a3a1a;
+    color:#ffcc80;
+    border-color:#6a4f1a;
+}
+.qa-modal-summary{
+    font-size:11px;
+    color:var(--qa-muted);
+    padding:6px 8px;
+    border-radius:var(--qa-r-md);
+    background:var(--qa-surface-alt);
+    border:1px solid var(--qa-border);
+    line-height:1.4;
+}
+.qa-modal-summary[hidden]{ display:none; }
+.qa-modal-summary-checking{ font-style:italic; }
+.qa-modal-summary-warn{
+    background:#fff8e1;
+    color:#7a5300;
+    border-color:#f0d47a;
+}
+.qa-modal-overlay.qa-dark .qa-modal-summary-warn{
+    background:#3a2f18;
+    color:#ffcc80;
+    border-color:#6a4f1a;
 }
 .qa-modal-meta{
     display:flex;

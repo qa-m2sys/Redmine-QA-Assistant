@@ -5,7 +5,30 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.2.0 — current
+## Version 6.2.1 — current
+
+### Bulk close: workflow pre-flight + smarter dropdown scrape
+- 🧪 **Pre-flight workflow check.** Ticking a card in select mode now
+  quietly asks Redmine (once per source status) whether *Closed* is a
+  legal transition from that status. The confirmation modal shows a
+  per-row badge for every card that would be **skipped** —
+  *already closed* or *workflow blocks* — plus a summary line
+  (`3 will close · 1 already closed · 2 blocked by workflow`).
+  The submit button relabels to *Close N issues* using the real
+  count, and the POST only sends cards that will actually change, so
+  the toast and reload numbers match what the user confirmed.
+- 🚦 **"Couldn't find 'Closed' status" false alarm fixed.** When the
+  first-ticked card was in a column whose current status has no
+  direct *Closed* transition (e.g. *New*), Redmine's `bulk_edit`
+  form hid the *Closed* option from its status dropdown and the
+  scrape blew up. The panel now falls back to the Agile plugin's
+  own column headers (`th[data-column-id]`), which always render
+  regardless of workflow rules, so the closed-status id is picked
+  up reliably.
+
+---
+
+## Version 6.2.0
 
 ### Bulk close from the Agile board
 - 📈 **Close many issues at once, right from the board.** A new
