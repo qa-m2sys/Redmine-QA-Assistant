@@ -1,29 +1,110 @@
 # QA Assistant for Redmine
 
-A lightweight helper that streamlines **issue reporting** on
-`https://redmine.kernello.com` for both **QA engineers and developers**. It
-adds a floating panel that lets you jump straight to a project's **New issue**
-form for any tracker (**Bug, Feature, Task, User story, Test case** or
-**Suggestion**), auto-fills a consistent **per-tracker** template (tracker,
-status, priority, assignee and description), optionally uses **OpenAI** to
-turn rough notes into a fully structured report, and offers handy copy/clear
-tools — all without touching Redmine's markup.
+**File bug reports, features, and tasks on Redmine in seconds — without hunting through menus, retyping the same fields, or leaving the app you're testing.**
 
-The same panel also runs on the app under test, `https://dev.cloudapper.com`,
-as a **launcher**: pick a tracker + project and it opens the matching Redmine
-New-issue form in a new tab — so you can report or open a board without ever
-leaving the app you're testing.
+A floating, draggable panel that lives on top of Redmine (and the app under test) and does the tedious parts of issue reporting for you.
 
-It ships in **two interchangeable forms** so you can use whichever fits your setup:
+---
+
+## Who is it for?
+
+- **QA engineers** — file consistent, well-structured bug reports and test cases without retyping boilerplate.
+- **Developers** — quickly open the right project's board or file a feature / task without navigating Redmine's menus.
+- **Anyone on the team** who reports issues on `redmine.kernello.com`.
+
+---
+
+## Where it runs
+
+| Site | What the panel does there |
+|------|---------------------------|
+| `https://redmine.kernello.com/*` | **Full assistant** — pick tracker + project, auto-fill the form, use AI, copy/clear, open boards. |
+| `https://dev.cloudapper.com/*` | **Launcher mode** — pick tracker + project and it opens the matching Redmine New-issue form in a new tab, so you can report a bug or open a board without leaving the app you're testing. |
+
+---
+
+## What it does — at a glance
+
+### 📝 Report an issue in three clicks
+- Pick a **tracker** — Bug, Feature, Task, User story, Test case, or Suggestion.
+- Pick a **project** — Web, Backend, iOS, or Android.
+- Redmine opens the New-issue form in a new tab, **pre-filled** with:
+  - the right tracker, status (New), priority (Normal),
+  - the team's assignee for that project,
+  - and a description template tailored to the tracker you picked.
+- Your last-used tracker is remembered next time you open the panel.
+
+### 🧠 AI report assistant (optional)
+- Toggle to **AI mode** and paste your rough notes — reproduction steps, a screenshot description, a feature idea — into a chat box.
+- The assistant returns an **editable Subject + Description** in the format that matches your selected tracker (steps + expected result for bugs, acceptance criteria for user stories, test steps for test cases, etc.).
+- **Multi-turn chat** — refine the result with follow-up messages.
+- **Pick your model** — `gpt-4o` (default), `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4-turbo`.
+- **Fill Subject & Description** button drops the result straight into the Redmine form.
+- **Bring your own OpenAI API key** — stored locally in the browser, never sent anywhere except OpenAI.
+
+### 📄 Per-tracker description templates
+- Every tracker ships with its own default template shaped for that kind of report — steps + expected scenario for bugs, checklists for tasks, current/suggested/benefit for suggestions, and so on.
+- Edit any template inline and hit **Save** — it's stored under that tracker only.
+- Hit **Reset** to restore the shipped default for the current tracker.
+- Your template drives **Fill**, **Copy**, auto-fill after navigation, **and** the AI assistant's structure.
+
+### 🚀 Agile boards, one click away
+- Open any project's **current sprint board** (Web / Backend / iOS / Android) in a new tab.
+- If you switch to a different version of a board in Redmine, it **remembers your choice** and reopens that one next time.
+
+### ⚡ Toolbar actions
+- **Fill** — apply the template to the currently open issue form.
+- **Copy** — copy the current tracker's description template to the clipboard.
+- **Clear** — clear the subject + description fields in one click.
+- **Toast notifications** confirm every action.
+
+### ✅ Close an issue in one click
+- New **"Close this issue"** section that appears on any Redmine issue detail page (`/issues/<n>`).
+- Pick the **Closed Version** from a dropdown that mirrors Redmine's own list (custom field #12), and the panel writes:
+  - **Status → Closed**
+  - **Closed Version → your pick**
+  - **Notes → `Issue resolved. Tested in <Project> — <Version>.`** (shown in an editable textarea so you can tweak the wording before you commit — add device, build, tester name, whatever).
+- Two buttons for safety:
+  - **Fill only** — fills the three fields and reveals the Update panel; you review and Submit yourself.
+  - **Close issue** — fills + auto-submits.
+- Both buttons stay disabled until a version is picked *and* the note has content.
+
+### ⌨️ Keyboard-first workflow
+- <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>4</kbd> — open Web / Backend / iOS / Android New-issue form.
+- <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>…<kbd>4</kbd> — open the matching agile board.
+- <kbd>Alt</kbd>+<kbd>F</kbd> / <kbd>C</kbd> / <kbd>X</kbd> — Fill / Copy / Clear.
+- <kbd>Alt</kbd>+<kbd>Q</kbd> — collapse or expand the panel.
+- Shortcuts use physical key codes, so they work on any OS and keyboard layout (including the macOS Option key).
+
+### 🖱️ A panel that gets out of your way
+- **Drag** it anywhere on screen — position is remembered.
+- **Resize** from any edge or corner — size persists.
+- **Collapse** it to a compact bar to reclaim screen space.
+- **Dock** it to a small pill pinned to any screen edge — drag the pill to reposition, click to restore.
+- Auto-rotates to a **vertical strip** when collapsed against the left / right screen edge.
+- Never slips under the browser scrollbar.
+
+### 🎨 Personal look & feel
+- **Light / Dark mode** — click the 🌙 / ☀ button in the header; auto-follows your OS preference by default.
+- **Accent colour picker** — click the 🎨 button and choose from **Ocean blue**, **Lavender**, **Sunset orange**, or **Soft red**. Every button, hover state, focus ring, and section-header accent adapts instantly.
+- Both settings persist across page loads.
+- Frosted-glass panel with backdrop blur + saturation, inline SVG icons, soft focus rings, and gentle animations — all skipped when `prefers-reduced-motion` is set.
+
+### 💾 Everything remembers itself
+- Last-used tracker, last-viewed board, custom templates per tracker, panel position, size, collapsed / docked state, dock position, theme, accent colour, and (optionally) your AI API key — all persist across page loads and browser restarts.
+
+---
+
+## Two interchangeable forms
+
+Use whichever fits your setup — both versions share the exact same features and UI.
 
 | Form | Location | Use it when |
 |------|----------|-------------|
-| **Chrome extension** (MV3) | [`chrome-extension/`](chrome-extension/) | You want an easily shareable, installable extension. |
+| **Chrome extension** (MV3) | [`chrome-extension/`](chrome-extension/) | You want an easily shareable, one-click installable extension. |
 | **Userscript** | [`qa-assistant.user.js`](qa-assistant.user.js) | You use Tampermonkey / Violentmonkey or another userscript manager. |
 
-Both versions share the exact same features and UI.
-
-See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each version.
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a full history of what changed in each version.
 
 ---
 
@@ -69,6 +150,16 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a history of what changed in each v
   OpenAI API key, stored locally in the browser.
 - **Copy Description** — Copies the current template text to the clipboard.
 - **Clear Form** — Clears the subject and description fields in one click.
+- **Close an issue from the panel** — On any Redmine issue detail page a new
+  *Close this issue* section appears at the bottom of the panel. Pick a
+  **Closed Version** from a dropdown that mirrors Redmine's own custom-field
+  list, review the auto-generated note in an **editable textarea**
+  (`Issue resolved. Tested in <Project> — <Version>.` by default — tweak it
+  freely to add context) and choose either **Fill only** (fills Status →
+  Closed, Closed Version, and Notes so you can review before submitting)
+  or **Close issue** (fills + submits in one click). Both buttons stay
+  disabled until a version is picked and the note isn't empty. The section
+  is hidden on the New-issue form and on `dev.cloudapper.com`.
 - **Toast notifications** — Small confirmations for every action.
 - **Floating, draggable panel** — Drag the panel anywhere on screen; its
   position is remembered.

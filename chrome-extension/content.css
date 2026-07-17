@@ -1171,6 +1171,51 @@
     cursor:pointer;
 }
 
+/* ---------- Close this issue ---------- */
+/* Appears at the bottom of the panel body when the current URL is
+   /issues/<id>. The section shares tokens with the rest of the panel so
+   accent + dark-mode changes flow through automatically — no bespoke
+   colours here beyond the disabled-state background. */
+.qa-close-issue-wrap[hidden]{ display:none; }
+.qa-close-issue-wrap .qa-ai-model-row{
+    margin-top:2px;
+    margin-bottom:6px;
+}
+.qa-close-note-input{
+    display:block;
+    width:100%;
+    box-sizing:border-box;
+    min-height:52px;
+    resize:vertical;
+    background:var(--qa-surface-alt, color-mix(in srgb, var(--qa-text) 6%, transparent));
+    border:1px solid var(--qa-border);
+    border-radius:var(--qa-r-md);
+    padding:8px 10px;
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Code", monospace;
+    font-size:12px;
+    line-height:1.45;
+    color:var(--qa-text);
+    white-space:pre-wrap;
+    word-break:break-word;
+    margin:0 0 8px;
+    transition:border-color .15s ease, box-shadow .15s ease;
+}
+.qa-close-note-input:focus{
+    outline:none;
+    border-color:var(--qa-brand);
+    box-shadow:0 0 0 3px var(--qa-brand-focus-ring);
+}
+.qa-close-note-input:disabled{
+    color:var(--qa-muted);
+    cursor:not-allowed;
+    opacity:.75;
+}
+.qa-close-note-input::placeholder{
+    color:var(--qa-muted);
+    font-style:italic;
+    font-family:inherit;
+}
+
 .qa-ai-chat{
     display:flex;
     flex-direction:column;

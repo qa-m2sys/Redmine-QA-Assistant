@@ -620,6 +620,137 @@ As a <role>, I want <goal> so that <benefit>.
     }
 
     //////////////////////////////////////////////////////
+    // Close Issue
+    //////////////////////////////////////////////////////
+
+    // Numeric id of the Redmine custom field that stores the "Closed Version"
+    // value on an issue. Confirmed from the DOM as
+    // <select name="issue[custom_field_values][12]" id="issue_custom_field_values_12">.
+    const CLOSED_VERSION_CF_ID = "12";
+
+    // /issues/<n>, /issues/<n>/, /issues/<n>/edit — but NOT /issues/new.
+    function isIssueDetailPage() {
+        return /\/issues\/\d+(?:\/edit)?\/?$/.test(location.pathname);
+    }
+
+    // /issues/new or /projects/<ident>/issues/new — the only page where the
+    // Description Source section (template editor + AI draft + Fill/Clear)
+    // has a form to act on. On any other Redmine page (issue detail, issue
+    // list, project overview, My page, …) the section would be dead weight
+    // since its buttons target `#issue_subject` / `#issue_description`, which
+    // only exist here.
+    function isNewIssuePage() {
+        return /(?:^|\/)issues\/new\/?$/.test(location.pathname);
+    }
+
+    // Redmine adds a "project-<identifier>" class to <body> on every project
+    // page. Map that identifier back to our internal project key so the note
+    // we insert can use the short name ("Web", "Backend", "iOS", "Android").
+    function projectKeyFromBodyClass() {
+        if (!document.body || !document.body.className) return null;
+        const m = document.body.className.match(/\bproject-([\w-]+)/);
+        if (!m) return null;
+        const ident = m[1];
+        return PROJECT_ORDER.find(
+            (k) => PROJECTS[k].path.indexOf("/projects/" + ident + "/") === 0
+        ) || null;
+    }
+
+    // Reads the Redmine "Closed Version" custom-field <select> on the current
+    // issue page and mirrors its options into the panel's version picker so the
+    // user picks from the same list Redmine would offer them.
+    function populateCloseVersionSelect(panelSelect) {
+        if (!panelSelect) return false;
+        const source =
+            document.getElementById("issue_custom_field_values_" + CLOSED_VERSION_CF_ID) ||
+            document.querySelector('select[name="issue[custom_field_values][' + CLOSED_VERSION_CF_ID + ']"]');
+        if (!source) return false;
+        const current = panelSelect.value;
+        // Placeholder first, then mirror every real option.
+        panelSelect.innerHTML = '<option value="">— pick a version —</option>';
+        for (const opt of source.options) {
+            if (!opt.value) continue; // skip Redmine's own blank placeholder
+            const clone = document.createElement("option");
+            clone.value = opt.value;
+            clone.textContent = opt.text.trim();
+            panelSelect.appendChild(clone);
+        }
+        // Preserve the previously chosen value across DOM refreshes when possible.
+        if (current && Array.from(panelSelect.options).some((o) => o.value === current)) {
+            panelSelect.value = current;
+        }
+        return true;
+    }
+
+    // Format: "Issue resolved. Tested in <Short> — <VersionLabel>". The em dash
+    // avoids the redundant read ("Web Web App Sprint v10.0.0") when the
+    // version label already contains the app name.
+    function buildCloseNote(projectKey, versionLabel) {
+        const shortName = (projectKey && PROJECTS[projectKey]) ? PROJECTS[projectKey].label : "";
+        if (!versionLabel) return "";
+        return shortName
+            ? "Issue resolved. Tested in " + shortName + " — " + versionLabel + "."
+            : "Issue resolved. Tested in " + versionLabel + ".";
+    }
+
+    // Applies the close-issue values to the Redmine update form:
+    //   - Status → Closed (by option text, so it works across Redmine setups).
+    //   - Closed Version → the picked version id.
+    //   - Notes → whatever the user has in the panel textarea (the caller
+    //     passes the current value, which may have been edited from the
+    //     auto-generated default).
+    // Returns true if all three fields were found and written; false otherwise.
+    function fillCloseFields(versionValue, noteText) {
+        if (!versionValue) return false;
+
+        // Status → Closed. Fires change so any Redmine listeners run
+        // (unlike the New-issue path where change would trigger an AJAX reload).
+        setSelectByText("issue_status_id", "Closed");
+
+        // Closed Version custom field.
+        const cf = document.getElementById("issue_custom_field_values_" + CLOSED_VERSION_CF_ID);
+        if (cf) {
+            cf.value = versionValue;
+            fireEvents(cf);
+        }
+
+        // Notes textarea.
+        const notes = document.getElementById("issue_notes");
+        if (notes) {
+            notes.value = noteText || "";
+            fireEvents(notes);
+        }
+
+        // Redmine issue pages hide the update form until the user clicks
+        // "Update"; reveal it so the user can see what we've filled in.
+        // (The fields exist in the DOM either way — this is purely for UX.)
+        if (typeof showAndScrollTo === "function") {
+            try { showAndScrollTo("update", "notes"); } catch (e) { /* ignore */ }
+        } else {
+            const update = document.getElementById("update");
+            if (update) update.style.display = "block";
+        }
+
+        return true;
+    }
+
+    // Submits the Redmine issue update form. Prefers clicking the real Submit
+    // <input> so any onsubmit handlers Redmine attaches still run; falls back
+    // to form.submit() only if the button isn't found.
+    function submitCloseForm() {
+        const form = document.getElementById("issue-form")
+                  || (document.getElementById("issue_status_id") && document.getElementById("issue_status_id").form);
+        if (!form) return false;
+        const submitBtn = form.querySelector('input[type="submit"], button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.click();
+        } else {
+            form.submit();
+        }
+        return true;
+    }
+
+    //////////////////////////////////////////////////////
     // Navigation
     //////////////////////////////////////////////////////
 
@@ -712,9 +843,13 @@ As a <role>, I want <goal> so that <benefit>.
         panel.id = "qa-panel";
 
         // The Description Source section (with Fill / Copy / Clear + template
-        // editor + AI) only makes sense on Redmine — it acts on the issue form.
+        // editor + AI) only makes sense on the New-issue form — it targets
+        // `#issue_subject` / `#issue_description`, which only exist there.
+        // On other Redmine pages (issue detail, list, project overview, …) the
+        // section would just be dead weight, so it's gated on isNewIssuePage().
         // On the app under test the panel is a launcher only.
-        const onRedmine = location.origin === REDMINE;
+        const onRedmine  = location.origin === REDMINE;
+        const onNewIssue = onRedmine && isNewIssuePage();
 
         // Launcher hosts (dev.cloudapper.com etc.) show a shorter body \u2014 no
         // Description Source section. Tag the panel so CSS can raise the
@@ -751,7 +886,7 @@ As a <role>, I want <goal> so that <benefit>.
                     </a>`;
         }).join("");
 
-        const templateHtml = onRedmine ? `
+        const templateHtml = onNewIssue ? `
                 <div class="qa-divider"></div>
                 <div class="qa-section-label">Step 3 · Description source</div>
                 <div class="qa-tmpl-wrap" id="qa-tmpl-wrap">
@@ -812,6 +947,31 @@ As a <role>, I want <goal> so that <benefit>.
                     </div>
                 </div>` : "";
 
+        // "Close this issue" section — only rendered on Redmine, and only made
+        // visible when the current URL matches /issues/<id> (populated at init).
+        // Reads the "Closed Version" custom-field options from the page, lets
+        // the user pick one, previews the auto-generated note, and offers
+        // Fill-only vs Fill+Submit. Both buttons stay disabled until a version
+        // is picked (per the design spec).
+        const closeIssueHtml = onRedmine ? `
+                <div class="qa-close-issue-wrap" id="qa-close-issue-wrap" hidden>
+                    <div class="qa-divider"></div>
+                    <div class="qa-section-label">Close this issue</div>
+                    <label class="qa-ai-model-row">
+                        <span>Closed version</span>
+                        <select id="qa-close-version" class="qa-ai-field">
+                            <option value="">— pick a version —</option>
+                        </select>
+                    </label>
+                    <textarea id="qa-close-note" class="qa-close-note-input"
+                              spellcheck="false" rows="2" disabled
+                              placeholder="Pick a closed version above to preview the note. You can edit it before filling."></textarea>
+                    <div class="qa-template-actions">
+                        <button class="qa-btn qa-tmpl-btn" data-action="close-fill" disabled title="Fill status, closed version and note — you review and Submit"><span class="qa-btn-icon">${svgIcon("download")}</span><span class="qa-btn-label">Fill only</span></button>
+                        <button class="qa-btn qa-tmpl-btn qa-action" data-action="close-submit" disabled title="Fill everything and submit — closes the issue"><span class="qa-btn-icon">${svgIcon("check-square")}</span><span class="qa-btn-label">Close issue</span></button>
+                    </div>
+                </div>` : "";
+
         panel.innerHTML = `
             <div class="qa-header" id="qa-header">
                 <span class="qa-title"><span class="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
@@ -839,6 +999,7 @@ As a <role>, I want <goal> so that <benefit>.
                 </div>
                 <div class="qa-project-grid" id="qa-project-list" hidden>${projectButtons}</div>
                 ${templateHtml}
+                ${closeIssueHtml}
                 <div class="qa-divider"></div>
                 <div class="qa-section-label">Agile Boards</div>
                 <div class="qa-boards-row" id="qa-boards-wrap">
@@ -912,8 +1073,10 @@ As a <role>, I want <goal> so that <benefit>.
             });
         });
 
-        // Action buttons + template editor only exist on Redmine.
-        if (onRedmine) {
+        // Action buttons + template editor + AI panel only exist on the
+        // New-issue page (see the onNewIssue gate on templateHtml above).
+        // On other Redmine pages this whole wiring block is skipped.
+        if (onNewIssue) {
             panel.querySelector('[data-action="fill"]').addEventListener("click", () => {
                 fillIssue(sessionStorage.getItem(STORAGE.project));
                 toast("Template filled");
@@ -1129,6 +1292,88 @@ As a <role>, I want <goal> so that <benefit>.
             // Default to AI mode when nothing has been saved yet — users
             // typically want the assistant first, and can flip to Template.
             setAiMode(localStorage.getItem(STORAGE.aiMode) !== "0");
+        }
+
+        // ---- Close this issue (rendered on every Redmine page, revealed only on /issues/<n>) ----
+        // The close-issue markup lives outside the Description Source gate:
+        // it renders on any Redmine page but self-hides via [hidden] until
+        // isIssueDetailPage() confirms we're actually looking at an issue.
+        if (onRedmine) {
+            const closeWrap    = panel.querySelector("#qa-close-issue-wrap");
+            const closeVerSel  = panel.querySelector("#qa-close-version");
+            const closeNote    = panel.querySelector("#qa-close-note");
+            const closeFillBtn = panel.querySelector('[data-action="close-fill"]');
+            const closeSubBtn  = panel.querySelector('[data-action="close-submit"]');
+
+            // Keep the select + textarea out of the way of panel drag / global
+            // shortcut handlers, matching the other form controls in this panel.
+            closeVerSel.addEventListener("mousedown", (e) => e.stopPropagation());
+            closeVerSel.addEventListener("keydown",   (e) => e.stopPropagation());
+            closeNote.addEventListener("mousedown",   (e) => e.stopPropagation());
+            closeNote.addEventListener("keydown",     (e) => e.stopPropagation());
+
+            // Enable Fill / Close only when the textarea has content AND a
+            // version is picked. Called after both a version change and any
+            // user edit of the note.
+            function updateCloseButtons() {
+                const hasVersion = !!closeVerSel.value;
+                const hasNote = closeNote.value.trim().length > 0;
+                const ok = hasVersion && hasNote;
+                closeFillBtn.disabled = !ok;
+                closeSubBtn.disabled  = !ok;
+            }
+
+            // When the version changes we (re)generate the default note text
+            // and drop it into the textarea so the user always starts from a
+            // fresh, correct baseline for the newly picked version. If they
+            // want to tweak wording, they can do so freely afterwards — their
+            // edits are only overwritten when they change the version again.
+            closeVerSel.addEventListener("change", () => {
+                const opt = closeVerSel.options[closeVerSel.selectedIndex];
+                const versionLabel = (opt && opt.value) ? opt.text : "";
+                const projectKey = projectKeyFromBodyClass();
+                if (versionLabel) {
+                    closeNote.value = buildCloseNote(projectKey, versionLabel);
+                    closeNote.disabled = false;
+                } else {
+                    closeNote.value = "";
+                    closeNote.disabled = true;
+                }
+                updateCloseButtons();
+            });
+
+            // User edits to the note also re-evaluate button state, so
+            // emptying the textarea disables Fill/Close (prevents submitting
+            // an issue-close with a blank note).
+            closeNote.addEventListener("input", updateCloseButtons);
+
+            closeFillBtn.addEventListener("click", () => {
+                if (!closeVerSel.value) return;
+                const ok = fillCloseFields(closeVerSel.value, closeNote.value);
+                toast(ok ? "Close fields filled — review, then Submit" : "Couldn't find the update form");
+            });
+
+            closeSubBtn.addEventListener("click", () => {
+                if (!closeVerSel.value) return;
+                const filled = fillCloseFields(closeVerSel.value, closeNote.value);
+                if (!filled) { toast("Couldn't find the update form"); return; }
+                // Small delay so the change events dispatched by fillCloseFields
+                // flush before the form submits (avoids Redmine skipping the
+                // status/notes we just wrote).
+                setTimeout(() => {
+                    submitCloseForm() || toast("Couldn't submit the update form");
+                }, 60);
+            });
+
+            // Populate + reveal the section only when we're actually looking at
+            // an issue detail page. On the new-issue form the section stays
+            // hidden — no need to close a not-yet-created issue.
+            if (isIssueDetailPage()) {
+                if (populateCloseVersionSelect(closeVerSel)) {
+                    closeWrap.hidden = false;
+                    updateCloseButtons();
+                }
+            }
         }
 
         // Agile Boards render inline now — no collapse toggle. Board links

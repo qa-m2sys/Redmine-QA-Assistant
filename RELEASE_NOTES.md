@@ -5,7 +5,99 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.0 — current
+## Version 6.1.2 — current
+
+### Description Source narrowed to the New-issue page
+- 🎯 **Section only shows where it actually works.** The
+  *Step 3 · Description source* section (template editor + AI
+  assistant + Fill / Copy / Clear buttons) previously appeared on
+  every Redmine page. On issue detail views, issue lists, project
+  overviews and My page there was no `#issue_subject` /
+  `#issue_description` to act on, so the buttons were dead weight.
+  It's now gated behind a new `isNewIssuePage()` check that matches
+  `/issues/new` and `/projects/*/issues/new` — the only pages where
+  the form exists.
+- 🧹 **Cleaner panel on non-form pages.** On an issue detail page
+  you now see just the report launcher, agile boards row, and
+  *Close this issue* section — no unused template editor taking
+  up space.
+- 🔨 The wiring for the template editor + AI panel is skipped
+  entirely when the section isn't rendered, so no wasted event
+  listeners on pages that don't need them.
+- ✅ The *Close this issue* section still renders on every Redmine
+  page and self-reveals only on `/issues/<n>` — unchanged.
+
+---
+
+## Version 6.1.1
+
+### Editable close-issue note
+- ✏️ **The auto-generated close note is now editable in place.** The
+  preview `<div>` was upgraded to a `<textarea>` so you can tweak the
+  wording before hitting Fill or Close — add extra context (device,
+  build, tester name), rewrite the sentence, or paste from another
+  source. Both **Fill only** and **Close issue** now send whatever text
+  is in the panel, not the auto-generated default.
+- 🔄 **Version change regenerates the note** so switching versions
+  always gives you a fresh, correct baseline for the newly picked
+  version. If you had already edited the text, changing the version
+  overwrites your edit — a predictable trade-off that keeps stale
+  version names from silently sneaking into your note.
+- 🚫 **Blank-note guard.** Fill / Close automatically disable if you
+  empty the textarea, so an accidental delete-all can't submit a close
+  with no note.
+- 🔨 Small refactor: `fillCloseFields(versionValue, noteText)` now
+  takes the note string directly instead of composing it internally.
+  The `buildCloseNote(project, version)` helper remains the default
+  generator, called only when the version changes.
+
+---
+
+## Version 6.1
+
+### Close an issue straight from the panel
+- ✅ **New "Close this issue" section** appears at the bottom of the panel
+  whenever the current page is a Redmine issue detail view
+  (`/issues/<n>`). Stays hidden on the New-issue form, on agile boards,
+  and on the launcher host (`dev.cloudapper.com`) — so it only surfaces
+  where it's actually useful.
+- 🏷️ **Closed-version picker mirrors the page's own dropdown.** The
+  section reads the options from Redmine's `Closed Version` custom
+  field (`issue[custom_field_values][12]`) at panel init, so you're
+  picking from the exact same list Redmine would offer under Update.
+  No hard-coded version list — new sprints/versions show up
+  automatically as soon as they exist in Redmine.
+- ✍️ **Live note preview** updates as you pick a version. Format:
+  `Issue resolved. Tested in <Project> — <Version>.` The em dash keeps
+  the sentence readable even when the version label already contains
+  the app name (e.g. "Web — Web App Sprint v10.0.0" instead of the
+  awkward "Web Web App Sprint v10.0.0"). Project short-name is derived
+  from Redmine's own `body.project-<identifier>` class so it stays
+  correct even if you navigate through several projects in one
+  session.
+- 🔏 **Two-step safety by default.** The section ships two buttons:
+  - **Fill only** — sets Status → Closed, Closed Version → your pick,
+    and Notes → the auto-generated message. Reveals Redmine's Update
+    panel so you can eyeball what was filled, then click Submit
+    yourself.
+  - **Close issue** — same fill, then clicks the form's Submit button
+    for you. One click to close.
+- 🚫 **Both buttons stay disabled until a version is picked**, so an
+  accidental click can't close an issue with no version recorded —
+  matching the design constraint we agreed on up front.
+- 🎨 **Themes for free.** The section uses the same tokens as the rest
+  of the panel, so dark mode + every accent (Ocean blue / Lavender /
+  Sunset orange / Soft red) style it correctly on day one — no extra
+  colour rules needed.
+- ⚙️ **Robust status lookup.** Status is set by option *text* ("Closed")
+  rather than by hard-coded numeric id, so the feature keeps working
+  across Redmine installs that renumber statuses.
+- 🔐 **Zero new permissions.** Everything runs on DOM the panel already
+  has access to; no manifest changes.
+
+---
+
+## Version 6.0
 
 ### Accent colour picker in the header
 - 🎨 **New palette button** in the panel header opens a small popover with
