@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      5.47
+// @version      6.0.3
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -173,6 +173,7 @@ As a <role>, I want <goal> so that <benefit>.
         boardsOpen:"qa-boards-open",
         lastBoard: "qa-last-board",
         theme:     "qa-theme",
+        accent:    "qa-accent",
         aiMode:    "qa-ai-mode",
         aiKey:     "qa-openai-key",
         aiModel:   "qa-openai-model"
@@ -203,6 +204,10 @@ As a <role>, I want <goal> so that <benefit>.
             minus:           `<svg ${A}><path d="M5 12h14"/></svg>`,
             plus:            `<svg ${A}><path d="M12 5v14M5 12h14"/></svg>`,
             "chevron-right": `<svg ${A}><path d="M9 6l6 6-6 6"/></svg>`,
+            // Palette icon for the accent-colour picker in the header. Reads
+            // as a hand-held painter's palette (rounded blob + thumb notch
+            // on the lower-left + three paint dots in the well).
+            palette:         `<svg ${A}><path d="M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2v-.3c0-.6.2-1.2.6-1.6.4-.4 1-.6 1.6-.6H18a4 4 0 0 0 4-4c0-6-4.5-11-10-11z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="12" cy="7.5" r="1.2"/><circle cx="16.5" cy="11" r="1.2"/></svg>`,
             eye:             `<svg ${A}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`,
             "eye-off":       `<svg ${A}><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.5 19.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19M1 1l22 22M9.88 9.88a3 3 0 1 0 4.24 4.24"/></svg>`,
             rocket:          `<svg ${A}><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>`,
@@ -454,6 +459,10 @@ As a <role>, I want <goal> so that <benefit>.
     function applyTheme(panel, theme) {
         const dark = theme === "dark";
         panel.classList.toggle("qa-dark", dark);
+        // Popover lives on document.body — mirror the dark class so its
+        // own token overrides in content.css kick in.
+        const popover = document.getElementById("qa-accent-popover");
+        if (popover) popover.classList.toggle("qa-dark", dark);
         const btn = document.getElementById("qa-theme");
         if (btn) {
             btn.innerHTML = svgIcon(dark ? "sun" : "moon");
@@ -465,6 +474,43 @@ As a <role>, I want <goal> so that <benefit>.
         const theme = panel.classList.contains("qa-dark") ? "light" : "dark";
         localStorage.setItem(STORAGE.theme, theme);
         applyTheme(panel, theme);
+    }
+
+    //////////////////////////////////////////////////////
+    // Accent colour picker (light + dark friendly)
+    //////////////////////////////////////////////////////
+    // Each accent maps to a class on the panel (qa-accent-lavender etc.)
+    // which overrides the --qa-brand-* token cluster in content.css. The
+    // dark-mode class (.qa-dark) is orthogonal — every accent has both a
+    // light and a dark variant, so switching modes preserves the accent.
+    const ACCENTS = ["blue", "lavender", "orange", "red"];
+
+    function getAccent() {
+        const saved = localStorage.getItem(STORAGE.accent);
+        return ACCENTS.includes(saved) ? saved : "blue";
+    }
+
+    function applyAccent(panel, accent) {
+        ACCENTS.forEach(a => panel.classList.toggle(`qa-accent-${a}`, a === accent));
+        // Popover lives on document.body — mirror the accent class so its
+        // --qa-brand token override (used by the swatch focus ring)
+        // resolves correctly outside #qa-panel's scope.
+        const popover = document.getElementById("qa-accent-popover");
+        if (popover) {
+            ACCENTS.forEach(a => popover.classList.toggle(`qa-accent-${a}`, a === accent));
+        }
+        // Sync the selected-swatch ring. The popover is appended to
+        // document.body (see setupPanel) so we query the whole document,
+        // not just the panel.
+        document.querySelectorAll(".qa-swatch").forEach(sw => {
+            sw.classList.toggle("qa-swatch-active", sw.dataset.accent === accent);
+        });
+    }
+
+    function setAccent(panel, accent) {
+        if (!ACCENTS.includes(accent)) return;
+        localStorage.setItem(STORAGE.accent, accent);
+        applyAccent(panel, accent);
     }
 
     //////////////////////////////////////////////////////
@@ -789,9 +835,16 @@ As a <role>, I want <goal> so that <benefit>.
             <div class="qa-header" id="qa-header">
                 <span class="qa-title"><span class="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
                 <div class="qa-header-btns">
+                    <button class="qa-hbtn" id="qa-accent-btn" title="Accent colour" aria-haspopup="true" aria-expanded="false">${svgIcon("palette")}</button>
                     <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">${svgIcon("moon")}</button>
                     <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">${svgIcon("pin")}</button>
                     <button class="qa-hbtn qa-collapse" id="qa-collapse" title="Collapse / Expand">${svgIcon("minus")}</button>
+                </div>
+                <div class="qa-accent-popover" id="qa-accent-popover" role="menu" aria-label="Accent colour">
+                    <button type="button" class="qa-swatch qa-swatch-blue"     data-accent="blue"     title="Ocean blue"     aria-label="Ocean blue"></button>
+                    <button type="button" class="qa-swatch qa-swatch-lavender" data-accent="lavender" title="Lavender"       aria-label="Lavender"></button>
+                    <button type="button" class="qa-swatch qa-swatch-orange"   data-accent="orange"   title="Sunset orange" aria-label="Sunset orange"></button>
+                    <button type="button" class="qa-swatch qa-swatch-red"      data-accent="red"      title="Soft red"      aria-label="Soft red"></button>
                 </div>
             </div>
             <div class="qa-dock-face" id="qa-dock-face" title="Click to restore QA Assistant">QA</div>
@@ -1124,6 +1177,59 @@ As a <role>, I want <goal> so that <benefit>.
             toggleTheme(panel);
         });
         applyTheme(panel, getTheme());
+
+        // Accent colour picker. The popover is moved out of #qa-panel into
+        // document.body because the panel has both overflow:hidden and
+        // backdrop-filter, which together clip even position:fixed
+        // descendants (backdrop-filter promotes the panel to a containing
+        // block for fixed positioning). Detaching lets the popover render
+        // above everything at fixed viewport coordinates — crucial when the
+        // panel is collapsed to a 44px-tall pill and the popover has to
+        // appear below it.
+        const accentBtn = document.getElementById("qa-accent-btn");
+        const accentPopover = document.getElementById("qa-accent-popover");
+        document.body.appendChild(accentPopover);
+
+        function openAccent() {
+            // Anchor popover's top-right corner to the button's bottom-right.
+            const rect = accentBtn.getBoundingClientRect();
+            accentPopover.style.top = (rect.bottom + 6) + "px";
+            accentPopover.style.right = (window.innerWidth - rect.right) + "px";
+            accentPopover.classList.add("qa-accent-open");
+            accentBtn.setAttribute("aria-expanded", "true");
+        }
+        function closeAccent() {
+            accentPopover.classList.remove("qa-accent-open");
+            accentBtn.setAttribute("aria-expanded", "false");
+        }
+        const isAccentOpen = () => accentPopover.classList.contains("qa-accent-open");
+
+        accentBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            isAccentOpen() ? closeAccent() : openAccent();
+        });
+        accentPopover.addEventListener("click", (e) => {
+            const sw = e.target.closest(".qa-swatch");
+            if (!sw) return;
+            e.stopPropagation();
+            setAccent(panel, sw.dataset.accent);
+            closeAccent();
+        });
+        // mousedown (not click) closes on outside interaction — this also
+        // handles a header drag: the popover would otherwise stay at stale
+        // coordinates while the panel moves out from under it.
+        document.addEventListener("mousedown", (e) => {
+            if (!isAccentOpen()) return;
+            if (accentPopover.contains(e.target) || accentBtn.contains(e.target)) return;
+            closeAccent();
+        });
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && isAccentOpen()) {
+                closeAccent();
+                accentBtn.focus();
+            }
+        });
+        applyAccent(panel, getAccent());
 
         restorePanelState(panel);
         makeDraggable(panel, document.getElementById("qa-header"));
@@ -1611,7 +1717,10 @@ As a <role>, I want <goal> so that <benefit>.
     --qa-shadow-btn:       0 1px 2px rgba(0,0,0,.06);
     --qa-shadow-btn-hover: 0 2px 6px rgba(0,0,0,.06);
 
-    --qa-header-bg:        linear-gradient(135deg,rgba(44,62,80,.88),rgba(25,118,210,.88));
+    /* Header gradient. Left stop is a fixed slate; right stop is derived
+       from --qa-brand via color-mix so switching accent themes auto-tints
+       the header without any per-theme override. */
+    --qa-header-bg:        linear-gradient(135deg, rgba(44,62,80,.88), color-mix(in srgb, var(--qa-brand) 88%, transparent));
 
     --qa-kbd-bg:           rgba(0,0,0,.08);
     --qa-kbd-bg-inverse:   rgba(255,255,255,.25);
@@ -1704,6 +1813,16 @@ As a <role>, I want <goal> so that <benefit>.
 }
 #qa-panel kbd{
     font-family:var(--qa-font-mono) !important;
+}
+/* Defeat Redmine's own 'a { color: blue }' rule leaking into the panel.
+   The project cards (.qa-project-card) and board buttons (.qa-board-btn)
+   are <a> tags; their own 'color: var(--qa-text)' has specificity (0,1,0)
+   which loses to the host page's link colour. Prefixing with #qa-panel
+   bumps specificity to (1,0,1) and normalises every anchor's label to the
+   theme's text colour. Icons inside (.qa-*-emoji) still read --qa-brand
+   so they follow the accent. */
+#qa-panel a{
+    color:var(--qa-text);
 }
 #qa-panel.qa-dragging{
     box-shadow:var(--qa-shadow-lg);
@@ -1808,6 +1927,96 @@ As a <role>, I want <goal> so that <benefit>.
     stroke-linejoin:round;
 }
 .qa-collapse{ font-size:16px; }
+
+/* ---------- Accent colour picker ----------
+   Popover is appended to document.body (not inside #qa-panel) so it can
+   escape the panel's overflow:hidden. It uses position:fixed with top /
+   right set inline by JS from the palette button's bounding rect. This
+   works whether the panel is expanded (popover renders inside the body
+   area anyway) or collapsed to a 44 px pill (popover renders below the
+   panel over the page content). Each .qa-swatch is a filled circle with
+   a hard-coded background so users see all four colours at once,
+   independent of the currently active accent.
+
+   TOKEN SCOPE: because the popover is *not* inside #qa-panel, it can't
+   inherit the panel's CSS custom properties. We redefine the tokens it
+   needs (surface, border, brand, radius, shadow) directly on
+   .qa-accent-popover. JS mirrors the panel's 'qa-dark' and
+   'qa-accent-*' classes onto the popover so its own override blocks
+   below kick in — dark mode and accent switches both cascade correctly. */
+.qa-accent-popover{
+    --qa-surface:       rgba(255,255,255,.94);
+    --qa-border-strong: #dfe3e8;
+    --qa-shadow:        0 10px 30px rgba(0,0,0,.18);
+    --qa-r-md:          8px;
+    --qa-brand:         #1976d2;
+
+    position:fixed;
+    display:none;
+    align-items:center;
+    gap:8px;
+    padding:8px 10px;
+    background:var(--qa-surface);
+    border:1px solid var(--qa-border-strong);
+    border-radius:var(--qa-r-md);
+    box-shadow:var(--qa-shadow);
+    z-index:2147483647;
+    backdrop-filter:blur(24px) saturate(160%);
+    -webkit-backdrop-filter:blur(24px) saturate(160%);
+    animation:qa-accent-pop-in .14s ease-out both;
+}
+.qa-accent-popover.qa-accent-open{ display:flex; }
+
+/* Dark-mode surface + border for the popover (mirrors the tokens in
+   #qa-panel.qa-dark). */
+.qa-accent-popover.qa-dark{
+    --qa-surface:       rgba(31,41,51,.92);
+    --qa-border-strong: #3a4553;
+}
+
+/* Accent overrides for the popover — only --qa-brand needs syncing here,
+   because that's the token the swatch :focus-visible ring reads. All the
+   swatch fill colours are hard-coded (.qa-swatch-blue etc.) so they don't
+   depend on the active accent. */
+.qa-accent-popover.qa-accent-lavender{ --qa-brand:#7b3fe4; }
+.qa-accent-popover.qa-accent-orange  { --qa-brand:#e67e22; }
+.qa-accent-popover.qa-accent-red     { --qa-brand:#e57373; }
+.qa-accent-popover.qa-dark.qa-accent-lavender{ --qa-brand:#b79cff; }
+.qa-accent-popover.qa-dark.qa-accent-orange  { --qa-brand:#ffb066; }
+.qa-accent-popover.qa-dark.qa-accent-red     { --qa-brand:#ff9d9d; }
+@keyframes qa-accent-pop-in{
+    from{ opacity:0; transform:translateY(-4px); }
+    to  { opacity:1; transform:translateY(0); }
+}
+@media (prefers-reduced-motion: reduce){
+    .qa-accent-popover{ animation:none; }
+}
+.qa-swatch{
+    width:20px;
+    height:20px;
+    border-radius:50%;
+    border:1px solid rgba(0,0,0,.12);
+    padding:0;
+    cursor:pointer;
+    transition:transform .12s ease, box-shadow .12s ease;
+    position:relative;
+}
+.qa-swatch:hover{ transform:scale(1.1); }
+.qa-swatch:focus-visible{
+    outline:none;
+    box-shadow:0 0 0 2px var(--qa-surface), 0 0 0 4px var(--qa-brand);
+}
+.qa-swatch-active{
+    box-shadow:0 0 0 2px var(--qa-surface), 0 0 0 4px currentColor;
+}
+/* Swatch colours are fixed literals — they don't read tokens — so a user
+   can always see all four options as themselves, not filtered through the
+   active theme. 'color' is set to match the fill so the active-ring uses
+   currentColor. */
+.qa-swatch-blue    { background:#1976d2; color:#1976d2; }
+.qa-swatch-lavender{ background:#7b3fe4; color:#7b3fe4; }
+.qa-swatch-orange  { background:#e67e22; color:#e67e22; }
+.qa-swatch-red     { background:#e57373; color:#e57373; }
 
 /* Dock button is available in both expanded and collapsed states so the two
    headers keep matching buttons and positions. */
@@ -2823,6 +3032,65 @@ As a <role>, I want <goal> so that <benefit>.
     --qa-kbd-bg:           rgba(255,255,255,.12);
     --qa-scroll-thumb:       #3a4553;
     --qa-scroll-thumb-hover: #52616f;
+}
+
+/* ---------- Accent colours: light-mode overrides ----------
+   Each accent class overrides the --qa-brand-* token cluster. The default
+   (blue) uses the base tokens defined at the top of the file, so no
+   .qa-accent-blue block is needed. All hover/focus/selection states across
+   the panel read var(--qa-brand) so they adapt automatically. The header
+   gradient uses color-mix() on --qa-brand, so it also re-tints itself. */
+#qa-panel.qa-accent-lavender{
+    --qa-brand:            #7b3fe4;
+    --qa-brand-hover:      #6a2fd0;
+    --qa-brand-strong:     #4a1fa8;
+    --qa-brand-tint:       #f4f0ff;
+    --qa-brand-active-bg:  #ebe4ff;
+    --qa-brand-focus-ring: rgba(123,63,228,.15);
+}
+#qa-panel.qa-accent-orange{
+    --qa-brand:            #e67e22;
+    --qa-brand-hover:      #d35400;
+    --qa-brand-strong:     #a04000;
+    --qa-brand-tint:       #fdf3e7;
+    --qa-brand-active-bg:  #fbe6cf;
+    --qa-brand-focus-ring: rgba(230,126,34,.18);
+}
+#qa-panel.qa-accent-red{
+    --qa-brand:            #e57373;
+    --qa-brand-hover:      #d64545;
+    --qa-brand-strong:     #a02b2b;
+    --qa-brand-tint:       #fceded;
+    --qa-brand-active-bg:  #fadada;
+    --qa-brand-focus-ring: rgba(229,115,115,.18);
+}
+
+/* ---------- Accent colours: dark-mode overrides ----------
+   Combined with .qa-dark so both classes must match. Brighter/pastel
+   variants for legibility on dark surfaces. */
+#qa-panel.qa-dark.qa-accent-lavender{
+    --qa-brand:            #b79cff;
+    --qa-brand-hover:      #9d80f2;
+    --qa-brand-strong:     #d9d2f5;
+    --qa-brand-tint:       #33244a;
+    --qa-brand-active-bg:  #2f2a4a;
+    --qa-brand-focus-ring: rgba(183,156,255,.22);
+}
+#qa-panel.qa-dark.qa-accent-orange{
+    --qa-brand:            #ffb066;
+    --qa-brand-hover:      #f39944;
+    --qa-brand-strong:     #ffd9b3;
+    --qa-brand-tint:       #4a3826;
+    --qa-brand-active-bg:  #5a4028;
+    --qa-brand-focus-ring: rgba(255,176,102,.22);
+}
+#qa-panel.qa-dark.qa-accent-red{
+    --qa-brand:            #ff9d9d;
+    --qa-brand-hover:      #ef7f7f;
+    --qa-brand-strong:     #ffcccc;
+    --qa-brand-tint:       #4a2828;
+    --qa-brand-active-bg:  #5a2f2f;
+    --qa-brand-focus-ring: rgba(255,157,157,.22);
 }
 `;
     document.head.appendChild(style);

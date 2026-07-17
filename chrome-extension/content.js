@@ -167,6 +167,7 @@ As a <role>, I want <goal> so that <benefit>.
         boardsOpen:"qa-boards-open",
         lastBoard: "qa-last-board",
         theme:     "qa-theme",
+        accent:    "qa-accent",
         aiMode:    "qa-ai-mode",
         aiKey:     "qa-openai-key",
         aiModel:   "qa-openai-model"
@@ -197,6 +198,10 @@ As a <role>, I want <goal> so that <benefit>.
             minus:           `<svg ${A}><path d="M5 12h14"/></svg>`,
             plus:            `<svg ${A}><path d="M12 5v14M5 12h14"/></svg>`,
             "chevron-right": `<svg ${A}><path d="M9 6l6 6-6 6"/></svg>`,
+            // Palette icon for the accent-colour picker in the header. Reads
+            // as a hand-held painter's palette (rounded blob + thumb notch
+            // on the lower-left + three paint dots in the well).
+            palette:         `<svg ${A}><path d="M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2v-.3c0-.6.2-1.2.6-1.6.4-.4 1-.6 1.6-.6H18a4 4 0 0 0 4-4c0-6-4.5-11-10-11z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="12" cy="7.5" r="1.2"/><circle cx="16.5" cy="11" r="1.2"/></svg>`,
             eye:             `<svg ${A}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`,
             "eye-off":       `<svg ${A}><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.5 19.5 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19M1 1l22 22M9.88 9.88a3 3 0 1 0 4.24 4.24"/></svg>`,
             rocket:          `<svg ${A}><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>`,
@@ -435,6 +440,10 @@ As a <role>, I want <goal> so that <benefit>.
     function applyTheme(panel, theme) {
         const dark = theme === "dark";
         panel.classList.toggle("qa-dark", dark);
+        // Popover lives on document.body — mirror the dark class so its
+        // own token overrides in content.css kick in.
+        const popover = document.getElementById("qa-accent-popover");
+        if (popover) popover.classList.toggle("qa-dark", dark);
         const btn = document.getElementById("qa-theme");
         if (btn) {
             btn.innerHTML = svgIcon(dark ? "sun" : "moon");
@@ -446,6 +455,43 @@ As a <role>, I want <goal> so that <benefit>.
         const theme = panel.classList.contains("qa-dark") ? "light" : "dark";
         localStorage.setItem(STORAGE.theme, theme);
         applyTheme(panel, theme);
+    }
+
+    //////////////////////////////////////////////////////
+    // Accent colour picker (light + dark friendly)
+    //////////////////////////////////////////////////////
+    // Each accent maps to a class on the panel (qa-accent-lavender etc.)
+    // which overrides the --qa-brand-* token cluster in content.css. The
+    // dark-mode class (.qa-dark) is orthogonal — every accent has both a
+    // light and a dark variant, so switching modes preserves the accent.
+    const ACCENTS = ["blue", "lavender", "orange", "red"];
+
+    function getAccent() {
+        const saved = localStorage.getItem(STORAGE.accent);
+        return ACCENTS.includes(saved) ? saved : "blue";
+    }
+
+    function applyAccent(panel, accent) {
+        ACCENTS.forEach(a => panel.classList.toggle(`qa-accent-${a}`, a === accent));
+        // Popover lives on document.body — mirror the accent class so its
+        // --qa-brand token override (used by the swatch focus ring)
+        // resolves correctly outside #qa-panel's scope.
+        const popover = document.getElementById("qa-accent-popover");
+        if (popover) {
+            ACCENTS.forEach(a => popover.classList.toggle(`qa-accent-${a}`, a === accent));
+        }
+        // Sync the selected-swatch ring. The popover is appended to
+        // document.body (see setupPanel) so we query the whole document,
+        // not just the panel.
+        document.querySelectorAll(".qa-swatch").forEach(sw => {
+            sw.classList.toggle("qa-swatch-active", sw.dataset.accent === accent);
+        });
+    }
+
+    function setAccent(panel, accent) {
+        if (!ACCENTS.includes(accent)) return;
+        localStorage.setItem(STORAGE.accent, accent);
+        applyAccent(panel, accent);
     }
 
     //////////////////////////////////////////////////////
@@ -770,9 +816,16 @@ As a <role>, I want <goal> so that <benefit>.
             <div class="qa-header" id="qa-header">
                 <span class="qa-title"><span class="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
                 <div class="qa-header-btns">
+                    <button class="qa-hbtn" id="qa-accent-btn" title="Accent colour" aria-haspopup="true" aria-expanded="false">${svgIcon("palette")}</button>
                     <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">${svgIcon("moon")}</button>
                     <button class="qa-hbtn" id="qa-dock" title="Dock to screen edge">${svgIcon("pin")}</button>
                     <button class="qa-hbtn qa-collapse" id="qa-collapse" title="Collapse / Expand">${svgIcon("minus")}</button>
+                </div>
+                <div class="qa-accent-popover" id="qa-accent-popover" role="menu" aria-label="Accent colour">
+                    <button type="button" class="qa-swatch qa-swatch-blue"     data-accent="blue"     title="Ocean blue"     aria-label="Ocean blue"></button>
+                    <button type="button" class="qa-swatch qa-swatch-lavender" data-accent="lavender" title="Lavender"       aria-label="Lavender"></button>
+                    <button type="button" class="qa-swatch qa-swatch-orange"   data-accent="orange"   title="Sunset orange" aria-label="Sunset orange"></button>
+                    <button type="button" class="qa-swatch qa-swatch-red"      data-accent="red"      title="Soft red"      aria-label="Soft red"></button>
                 </div>
             </div>
             <div class="qa-dock-face" id="qa-dock-face" title="Click to restore QA Assistant">QA</div>
@@ -1105,6 +1158,59 @@ As a <role>, I want <goal> so that <benefit>.
             toggleTheme(panel);
         });
         applyTheme(panel, getTheme());
+
+        // Accent colour picker. The popover is moved out of #qa-panel into
+        // document.body because the panel has both overflow:hidden and
+        // backdrop-filter, which together clip even position:fixed
+        // descendants (backdrop-filter promotes the panel to a containing
+        // block for fixed positioning). Detaching lets the popover render
+        // above everything at fixed viewport coordinates — crucial when the
+        // panel is collapsed to a 44px-tall pill and the popover has to
+        // appear below it.
+        const accentBtn = document.getElementById("qa-accent-btn");
+        const accentPopover = document.getElementById("qa-accent-popover");
+        document.body.appendChild(accentPopover);
+
+        function openAccent() {
+            // Anchor popover's top-right corner to the button's bottom-right.
+            const rect = accentBtn.getBoundingClientRect();
+            accentPopover.style.top = (rect.bottom + 6) + "px";
+            accentPopover.style.right = (window.innerWidth - rect.right) + "px";
+            accentPopover.classList.add("qa-accent-open");
+            accentBtn.setAttribute("aria-expanded", "true");
+        }
+        function closeAccent() {
+            accentPopover.classList.remove("qa-accent-open");
+            accentBtn.setAttribute("aria-expanded", "false");
+        }
+        const isAccentOpen = () => accentPopover.classList.contains("qa-accent-open");
+
+        accentBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            isAccentOpen() ? closeAccent() : openAccent();
+        });
+        accentPopover.addEventListener("click", (e) => {
+            const sw = e.target.closest(".qa-swatch");
+            if (!sw) return;
+            e.stopPropagation();
+            setAccent(panel, sw.dataset.accent);
+            closeAccent();
+        });
+        // mousedown (not click) closes on outside interaction — this also
+        // handles a header drag: the popover would otherwise stay at stale
+        // coordinates while the panel moves out from under it.
+        document.addEventListener("mousedown", (e) => {
+            if (!isAccentOpen()) return;
+            if (accentPopover.contains(e.target) || accentBtn.contains(e.target)) return;
+            closeAccent();
+        });
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && isAccentOpen()) {
+                closeAccent();
+                accentBtn.focus();
+            }
+        });
+        applyAccent(panel, getAccent());
 
         restorePanelState(panel);
         makeDraggable(panel, document.getElementById("qa-header"));

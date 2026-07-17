@@ -50,7 +50,10 @@
     --qa-shadow-btn:       0 1px 2px rgba(0,0,0,.06);
     --qa-shadow-btn-hover: 0 2px 6px rgba(0,0,0,.06);
 
-    --qa-header-bg:        linear-gradient(135deg,rgba(44,62,80,.88),rgba(25,118,210,.88));
+    /* Header gradient. Left stop is a fixed slate; right stop is derived
+       from --qa-brand via color-mix so switching accent themes auto-tints
+       the header without any per-theme override. */
+    --qa-header-bg:        linear-gradient(135deg, rgba(44,62,80,.88), color-mix(in srgb, var(--qa-brand) 88%, transparent));
 
     --qa-kbd-bg:           rgba(0,0,0,.08);
     --qa-kbd-bg-inverse:   rgba(255,255,255,.25);
@@ -143,6 +146,16 @@
 }
 #qa-panel kbd{
     font-family:var(--qa-font-mono) !important;
+}
+/* Defeat Redmine's own `a { color: blue }` rule leaking into the panel.
+   The project cards (.qa-project-card) and board buttons (.qa-board-btn)
+   are <a> tags; their own `color: var(--qa-text)` has specificity (0,1,0)
+   which loses to the host page's link colour. Prefixing with #qa-panel
+   bumps specificity to (1,0,1) and normalises every anchor's label to the
+   theme's text colour. Icons inside (.qa-*-emoji) still read --qa-brand
+   so they follow the accent. */
+#qa-panel a{
+    color:var(--qa-text);
 }
 #qa-panel.qa-dragging{
     box-shadow:var(--qa-shadow-lg);
@@ -247,6 +260,96 @@
     stroke-linejoin:round;
 }
 .qa-collapse{ font-size:16px; }
+
+/* ---------- Accent colour picker ----------
+   Popover is appended to document.body (not inside #qa-panel) so it can
+   escape the panel's overflow:hidden. It uses position:fixed with top /
+   right set inline by JS from the palette button's bounding rect. This
+   works whether the panel is expanded (popover renders inside the body
+   area anyway) or collapsed to a 44 px pill (popover renders below the
+   panel over the page content). Each .qa-swatch is a filled circle with
+   a hard-coded background so users see all four colours at once,
+   independent of the currently active accent.
+
+   TOKEN SCOPE: because the popover is *not* inside #qa-panel, it can't
+   inherit the panel's CSS custom properties. We redefine the tokens it
+   needs (surface, border, brand, radius, shadow) directly on
+   .qa-accent-popover. JS mirrors the panel's `qa-dark` and
+   `qa-accent-*` classes onto the popover so its own override blocks
+   below kick in — dark mode and accent switches both cascade correctly. */
+.qa-accent-popover{
+    --qa-surface:       rgba(255,255,255,.94);
+    --qa-border-strong: #dfe3e8;
+    --qa-shadow:        0 10px 30px rgba(0,0,0,.18);
+    --qa-r-md:          8px;
+    --qa-brand:         #1976d2;
+
+    position:fixed;
+    display:none;
+    align-items:center;
+    gap:8px;
+    padding:8px 10px;
+    background:var(--qa-surface);
+    border:1px solid var(--qa-border-strong);
+    border-radius:var(--qa-r-md);
+    box-shadow:var(--qa-shadow);
+    z-index:2147483647;
+    backdrop-filter:blur(24px) saturate(160%);
+    -webkit-backdrop-filter:blur(24px) saturate(160%);
+    animation:qa-accent-pop-in .14s ease-out both;
+}
+.qa-accent-popover.qa-accent-open{ display:flex; }
+
+/* Dark-mode surface + border for the popover (mirrors the tokens in
+   #qa-panel.qa-dark). */
+.qa-accent-popover.qa-dark{
+    --qa-surface:       rgba(31,41,51,.92);
+    --qa-border-strong: #3a4553;
+}
+
+/* Accent overrides for the popover — only --qa-brand needs syncing here,
+   because that's the token the swatch :focus-visible ring reads. All the
+   swatch fill colours are hard-coded (.qa-swatch-blue etc.) so they don't
+   depend on the active accent. */
+.qa-accent-popover.qa-accent-lavender{ --qa-brand:#7b3fe4; }
+.qa-accent-popover.qa-accent-orange  { --qa-brand:#e67e22; }
+.qa-accent-popover.qa-accent-red     { --qa-brand:#e57373; }
+.qa-accent-popover.qa-dark.qa-accent-lavender{ --qa-brand:#b79cff; }
+.qa-accent-popover.qa-dark.qa-accent-orange  { --qa-brand:#ffb066; }
+.qa-accent-popover.qa-dark.qa-accent-red     { --qa-brand:#ff9d9d; }
+@keyframes qa-accent-pop-in{
+    from{ opacity:0; transform:translateY(-4px); }
+    to  { opacity:1; transform:translateY(0); }
+}
+@media (prefers-reduced-motion: reduce){
+    .qa-accent-popover{ animation:none; }
+}
+.qa-swatch{
+    width:20px;
+    height:20px;
+    border-radius:50%;
+    border:1px solid rgba(0,0,0,.12);
+    padding:0;
+    cursor:pointer;
+    transition:transform .12s ease, box-shadow .12s ease;
+    position:relative;
+}
+.qa-swatch:hover{ transform:scale(1.1); }
+.qa-swatch:focus-visible{
+    outline:none;
+    box-shadow:0 0 0 2px var(--qa-surface), 0 0 0 4px var(--qa-brand);
+}
+.qa-swatch-active{
+    box-shadow:0 0 0 2px var(--qa-surface), 0 0 0 4px currentColor;
+}
+/* Swatch colours are fixed literals — they don't read tokens — so a user
+   can always see all four options as themselves, not filtered through the
+   active theme. `color` is set to match the fill so the active-ring uses
+   currentColor. */
+.qa-swatch-blue    { background:#1976d2; color:#1976d2; }
+.qa-swatch-lavender{ background:#7b3fe4; color:#7b3fe4; }
+.qa-swatch-orange  { background:#e67e22; color:#e67e22; }
+.qa-swatch-red     { background:#e57373; color:#e57373; }
 
 /* Dock button is available in both expanded and collapsed states so the two
    headers keep matching buttons and positions. */
@@ -1262,5 +1365,64 @@
     --qa-kbd-bg:           rgba(255,255,255,.12);
     --qa-scroll-thumb:       #3a4553;
     --qa-scroll-thumb-hover: #52616f;
+}
+
+/* ---------- Accent colours: light-mode overrides ----------
+   Each accent class overrides the --qa-brand-* token cluster. The default
+   (blue) uses the base tokens defined at the top of the file, so no
+   .qa-accent-blue block is needed. All hover/focus/selection states across
+   the panel read `var(--qa-brand)` so they adapt automatically. The header
+   gradient uses color-mix() on --qa-brand, so it also re-tints itself. */
+#qa-panel.qa-accent-lavender{
+    --qa-brand:            #7b3fe4;
+    --qa-brand-hover:      #6a2fd0;
+    --qa-brand-strong:     #4a1fa8;
+    --qa-brand-tint:       #f4f0ff;
+    --qa-brand-active-bg:  #ebe4ff;
+    --qa-brand-focus-ring: rgba(123,63,228,.15);
+}
+#qa-panel.qa-accent-orange{
+    --qa-brand:            #e67e22;
+    --qa-brand-hover:      #d35400;
+    --qa-brand-strong:     #a04000;
+    --qa-brand-tint:       #fdf3e7;
+    --qa-brand-active-bg:  #fbe6cf;
+    --qa-brand-focus-ring: rgba(230,126,34,.18);
+}
+#qa-panel.qa-accent-red{
+    --qa-brand:            #e57373;
+    --qa-brand-hover:      #d64545;
+    --qa-brand-strong:     #a02b2b;
+    --qa-brand-tint:       #fceded;
+    --qa-brand-active-bg:  #fadada;
+    --qa-brand-focus-ring: rgba(229,115,115,.18);
+}
+
+/* ---------- Accent colours: dark-mode overrides ----------
+   Combined with .qa-dark so both classes must match. Brighter/pastel
+   variants for legibility on dark surfaces. */
+#qa-panel.qa-dark.qa-accent-lavender{
+    --qa-brand:            #b79cff;
+    --qa-brand-hover:      #9d80f2;
+    --qa-brand-strong:     #d9d2f5;
+    --qa-brand-tint:       #33244a;
+    --qa-brand-active-bg:  #2f2a4a;
+    --qa-brand-focus-ring: rgba(183,156,255,.22);
+}
+#qa-panel.qa-dark.qa-accent-orange{
+    --qa-brand:            #ffb066;
+    --qa-brand-hover:      #f39944;
+    --qa-brand-strong:     #ffd9b3;
+    --qa-brand-tint:       #4a3826;
+    --qa-brand-active-bg:  #5a4028;
+    --qa-brand-focus-ring: rgba(255,176,102,.22);
+}
+#qa-panel.qa-dark.qa-accent-red{
+    --qa-brand:            #ff9d9d;
+    --qa-brand-hover:      #ef7f7f;
+    --qa-brand-strong:     #ffcccc;
+    --qa-brand-tint:       #4a2828;
+    --qa-brand-active-bg:  #5a2f2f;
+    --qa-brand-focus-ring: rgba(255,157,157,.22);
 }
 

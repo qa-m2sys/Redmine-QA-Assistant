@@ -5,7 +5,91 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 5.47 — current
+## Version 6.0 — current
+
+### Accent colour picker in the header
+- 🎨 **New palette button** in the panel header opens a small popover with
+  four colour swatches: **Ocean blue** (the current default), **Lavender**,
+  **Sunset orange**, and **Soft red**. Click a swatch and the panel
+  re-themes instantly — tracker/project card hover & selection states,
+  section-label accent bars, focus rings, all buttons, the AI-key input
+  focus, board hover chips, and the header gradient all pick up the new
+  colour. Choice is persisted in `localStorage` under the `qa-accent`
+  key.
+- 🌓 **Works in both light and dark mode.** Each accent has a bright,
+  saturated light-mode variant and a softer pastel dark-mode variant, so
+  toggling the moon/sun icon preserves the accent while still hitting
+  the right contrast for each surface.
+- 🧩 **Zero refactor — pure token override architecture.** The picker
+  works because every rule in `content.css` already reads its colour
+  from `--qa-brand`, `--qa-brand-hover`, `--qa-brand-strong`,
+  `--qa-brand-tint`, `--qa-brand-active-bg`, and
+  `--qa-brand-focus-ring`. Each accent is just a class
+  (`#qa-panel.qa-accent-lavender`, etc.) that overrides that six-token
+  cluster — same pattern the dark mode toggle already uses.
+- ⚖️ **Header gradient now auto-tracks the accent.** Previously the
+  `--qa-header-bg` linear-gradient hard-coded `rgba(25,118,210,.88)`
+  (blue). Switched to
+  `color-mix(in srgb, var(--qa-brand) 88%, transparent)` so the header
+  re-tints itself with zero per-theme boilerplate.
+- 🏷️ **AI purple stays purple.** The AI-mode identity colour
+  (`--qa-accent`) is deliberately independent of the brand accent, so
+  Structure/Reset Chat and the AI review pane keep their purple
+  identifier no matter which brand colour you pick.
+- ⌨️ **Accessible:** the popover has `role="menu"`, each swatch has an
+  `aria-label`, the palette button toggles `aria-expanded`, and
+  <kbd>Esc</kbd> closes the popover and returns focus to the button.
+- 🔒 **Backwards-compatible.** Users upgrading from 5.47 have no
+  `qa-accent` key set, so `getAccent()` falls back to `"blue"` — the
+  panel looks *exactly* as it did before until they open the picker.
+
+### Bug fixes
+- 🐛 **Palette popover now actually renders.** In the first cut the
+  popover was `position: absolute` but its parent `.qa-header` had no
+  `position` set, so the popover anchored to `#qa-panel` instead — and
+  the panel's `overflow: hidden` clipped it out of sight. Added
+  `position: relative` on `.qa-header` so the popover positions
+  correctly just below the palette button.
+- 🐛 **Project + board button labels no longer stay blue** when the
+  accent is changed. Root cause: `.qa-project-card` and `.qa-board-btn`
+  are `<a>` tags, and their `color: var(--qa-text)` declaration has
+  specificity `(0,1,0)` — which lost to Redmine's own `a { color: ...
+  }` leaking into the panel. Added a scoped `#qa-panel a { color:
+  var(--qa-text) }` rule (specificity `(1,0,1)`) so anchor labels
+  follow the theme text colour. Icons inside remain `--qa-brand` and
+  keep swapping with the accent.
+- 🐛 **Palette popover now opens when the panel is collapsed.**
+  Previously the popover was an absolutely-positioned child of
+  `.qa-header`, and when the panel was collapsed to a 44 px pill the
+  popover extended below the panel bounds and got clipped by
+  `#qa-panel { overflow: hidden }`. Even switching it to
+  `position: fixed` didn't help — the panel's `backdrop-filter` promotes
+  it to a containing block, so *fixed* descendants get clipped too.
+  **Fix:** on panel init the popover is moved into `document.body` via
+  `appendChild`, and JS sets its `top` / `right` inline from the palette
+  button's `getBoundingClientRect()` each time it opens. The popover
+  now renders correctly whether the panel is expanded, collapsed
+  horizontally, or resized. Also switched the "click outside" listener
+  to `mousedown` so a header drag also closes the popover (otherwise it
+  would stay at stale coordinates while the panel moved).
+- 🐛 **Palette popover now has the correct light/dark background.**
+  Side-effect of moving the popover to `document.body` in 6.0.2: it
+  stopped inheriting the panel's CSS custom properties, so
+  `var(--qa-surface)` and `var(--qa-border-strong)` resolved to unset
+  — giving the popover a transparent background that let the page
+  content bleed through as "black," especially when the panel was
+  collapsed. **Fix:** the popover now defines its own baseline tokens
+  (`--qa-surface`, `--qa-border-strong`, `--qa-brand`, `--qa-shadow`,
+  `--qa-r-md`) directly on `.qa-accent-popover`, with
+  `.qa-accent-popover.qa-dark` and `.qa-accent-popover.qa-accent-*`
+  override blocks for the dark and accent variants. `applyTheme()` and
+  `applyAccent()` now mirror the panel's `qa-dark` and `qa-accent-*`
+  classes onto the popover element, so dark-mode and accent switches
+  propagate to the detached popover.
+
+---
+
+## Version 5.47
 
 ### Improvements
 - 🚀 The **header rocket icon** is now visible in the **vertical collapsed
