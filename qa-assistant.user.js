@@ -2144,7 +2144,7 @@ As a <role>, I want <goal> so that <benefit>.
         "Another fix. Another adventure.",
         "Validate everything.",
         "Severity: Depends who's asking.",
-        "Expected: Happiness. Actual: Exception.",
+        "Expected: Happiness. Actual: Exception."
 
     ];
 

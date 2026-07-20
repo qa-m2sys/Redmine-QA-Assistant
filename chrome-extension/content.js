@@ -2104,11 +2104,29 @@ As a <role>, I want <goal> so that <benefit>.
     // mouseenter so repeated hovers cycle through the set.
     const QA_QUOTES = [
         "You can do it. Maybe.",
-        "Make it happen. Somehow.",
         "Win or learn. Mostly learn.",
         "Be unstoppable. After coffee.",
         "You're not lazy. You're energy efficient.",
-        "Peak performance starts tomorrow."
+        "Peak performance starts tomorrow.",
+        "You found one bug. There are definitely more.",
+        "It passed. Suspicious.",
+        "Test first. Panic later.",
+        "If it isn't broken, test again.",
+        "One more regression won't hurt. Probably.",
+        "Every 'fixed' bug has a sequel.",
+        "Today's bug is tomorrow's feature request.",
+        "Every test tells a story.",
+        "'Cannot reproduce.' Challenge accepted.",
+        "Break it. Professionally.",
+        "The bug isn't gone. It's on vacation.",
+        "Edge cases are where the fun begins.",
+        "Think like a user. Then think worse.",
+        "Developer tested it. QA confirmed reality.",
+        "Reopened. With love.",
+        "Another fix. Another adventure.",
+        "Validate everything.",
+        "Severity: Depends who's asking.",
+        "Expected: Happiness. Actual: Exception.",
     ];
 
     function wireQuoteBubble(panel) {
