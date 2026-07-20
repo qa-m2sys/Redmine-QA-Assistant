@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      6.2.1
+// @version      6.3.0
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -1204,7 +1204,8 @@ As a <role>, I want <goal> so that <benefit>.
 
         panel.innerHTML = `
             <div class="qa-header" id="qa-header">
-                <span class="qa-title"><span class="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
+                <span class="qa-title"><span class="qa-title-icon" id="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
+                <div class="qa-quote-bubble" id="qa-quote-bubble" role="tooltip" hidden></div>
                 <div class="qa-header-btns">
                     <button class="qa-hbtn" id="qa-accent-btn" title="Accent colour" aria-haspopup="true" aria-expanded="false">${svgIcon("palette")}</button>
                     <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">${svgIcon("moon")}</button>
@@ -2106,9 +2107,156 @@ As a <role>, I want <goal> so that <benefit>.
         applyAccent(panel, getAccent());
 
         restorePanelState(panel);
+        wireQuoteBubble(panel);
         makeDraggable(panel, document.getElementById("qa-header"));
         makeDockDraggable(panel, document.getElementById("qa-dock-face"));
         addResizeHandles(panel);
+    }
+
+    //////////////////////////////////////////////////////
+    // Rocket-icon thought bubble
+    //////////////////////////////////////////////////////
+
+    // Motivational quotes shown when the user hovers the rocket icon in
+    // the header. Purely decorative — a random one is picked on every
+    // mouseenter so repeated hovers cycle through the set.
+    const QA_QUOTES = [
+        "You can do it. Maybe.",
+        "Make it happen. Somehow.",
+        "Win or learn. Mostly learn.",
+        "Be unstoppable. After coffee.",
+        "You're not lazy. You're energy efficient.",
+        "Peak performance starts tomorrow."
+    ];
+
+    function wireQuoteBubble(panel) {
+        const icon   = panel.querySelector("#qa-title-icon");
+        const bubble = panel.querySelector("#qa-quote-bubble");
+        if (!icon || !bubble) return;
+        // Reparent to <body> so the bubble escapes the panel's overflow
+        // clipping (collapsed / docked states) and stays visible *outside*
+        // the panel chrome. Same trick the accent popover uses.
+        if (bubble.parentElement !== document.body) document.body.appendChild(bubble);
+
+        let hideTimer = null;
+
+        // Compute a fixed-position slot for the bubble relative to the
+        // rocket icon. Tries the four sides in order (below, right, left,
+        // above) and picks the first one with enough room — so a
+        // collapsed panel docked to the right edge still gets a bubble on
+        // its *left*, and one docked to the bottom flips *above* rather
+        // than being clipped by the viewport.
+        function positionBubble() {
+            const r      = icon.getBoundingClientRect();
+            const bw     = bubble.offsetWidth;
+            const bh     = bubble.offsetHeight;
+            const vw     = window.innerWidth;
+            const vh     = window.innerHeight;
+            const gap    = 12;   // distance between icon and bubble
+            const margin = 8;    // minimum breathing room from viewport edge
+
+            const spaceBelow = vh - r.bottom;
+            const spaceRight = vw - r.right;
+            const spaceLeft  = r.left;
+            const spaceAbove = r.top;
+
+            let top, left;
+            if (spaceBelow >= bh + gap + margin) {
+                top  = r.bottom + gap;
+                left = Math.min(vw - bw - margin, Math.max(margin, r.left - 4));
+            } else if (spaceRight >= bw + gap + margin) {
+                left = r.right + gap;
+                top  = Math.min(vh - bh - margin, Math.max(margin, r.top + r.height / 2 - bh / 2));
+            } else if (spaceLeft >= bw + gap + margin) {
+                left = r.left - bw - gap;
+                top  = Math.min(vh - bh - margin, Math.max(margin, r.top + r.height / 2 - bh / 2));
+            } else if (spaceAbove >= bh + gap + margin) {
+                top  = r.top - bh - gap;
+                left = Math.min(vw - bw - margin, Math.max(margin, r.left - 4));
+            } else {
+                // Truly cramped viewport — just clamp inside the visible
+                // area so the bubble stays readable even if it overlaps
+                // the icon a bit.
+                top  = Math.max(margin, Math.min(vh - bh - margin, r.bottom + gap));
+                left = Math.max(margin, Math.min(vw - bw - margin, r.left - 4));
+            }
+
+            // Derive the tail side from the FINAL bubble rect vs the icon
+            // rect — not from the branch we took. Clamping can shove the
+            // bubble sideways (e.g. panel docked right: we plan "below"
+            // but the horizontal clamp lands the bubble to the *left* of
+            // the icon), and the tail needs to point back at the rocket
+            // regardless.
+            const overlapsHoriz = left < r.right  && left + bw > r.left;
+            const overlapsVert  = top  < r.bottom && top  + bh > r.top;
+            let side;
+            if (overlapsHoriz && !overlapsVert) {
+                side = top >= r.bottom ? "below" : "above";
+            } else if (overlapsVert && !overlapsHoriz) {
+                side = left >= r.right ? "right" : "left";
+            } else if (!overlapsHoriz && !overlapsVert) {
+                // Diagonal — pick the axis with the larger separation.
+                const dx = (r.left + r.width  / 2) - (left + bw / 2);
+                const dy = (r.top  + r.height / 2) - (top  + bh / 2);
+                if (Math.abs(dx) > Math.abs(dy)) side = dx > 0 ? "left"  : "right";
+                else                             side = dy > 0 ? "above" : "below";
+            } else {
+                side = "below";
+            }
+
+            bubble.dataset.side = side;
+            // Slide the two tail circles along the bubble's exposed edge
+            // so they always sit under (or beside) the rocket, even when
+            // the bubble was horizontally clamped by the viewport. CSS
+            // reads --qa-tail-offset to place the circles.
+            const iconCenterX = r.left + r.width  / 2;
+            const iconCenterY = r.top  + r.height / 2;
+            let tailOffset;
+            if (side === "below" || side === "above") {
+                tailOffset = Math.max(12, Math.min(bw - 12, iconCenterX - left));
+            } else {
+                tailOffset = Math.max(12, Math.min(bh - 12, iconCenterY - top));
+            }
+            bubble.style.setProperty("--qa-tail-offset", tailOffset + "px");
+            bubble.style.top    = top  + "px";
+            bubble.style.left   = left + "px";
+        }
+
+        const show = () => {
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+            // Mirror the panel's theme + accent classes onto the bubble so
+            // it picks up the same tokens even though it's parented to
+            // <body> and can't inherit from #qa-panel.
+            bubble.className = "qa-quote-bubble";
+            if (panel.classList.contains("qa-dark")) bubble.classList.add("qa-dark");
+            Array.from(panel.classList).forEach(c => {
+                if (c.indexOf("qa-accent-") === 0) bubble.classList.add(c);
+            });
+            bubble.textContent = QA_QUOTES[Math.floor(Math.random() * QA_QUOTES.length)];
+            bubble.hidden = false;
+            // Measure after content is set + hidden is cleared, then place
+            // before we run the open transition so the bubble grows from
+            // its final anchor rather than sliding across the screen.
+            positionBubble();
+            requestAnimationFrame(() => bubble.classList.add("qa-quote-bubble-open"));
+        };
+        const hide = () => {
+            bubble.classList.remove("qa-quote-bubble-open");
+            hideTimer = setTimeout(() => { bubble.hidden = true; hideTimer = null; }, 180);
+        };
+        icon.addEventListener("mouseenter", show);
+        icon.addEventListener("mouseleave", hide);
+        // Keep the bubble open if the user drifts onto the bubble itself
+        // (feels less finicky, and lets long quotes stay readable).
+        bubble.addEventListener("mouseenter", () => {
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        });
+        bubble.addEventListener("mouseleave", hide);
+        // Reposition while visible — the panel might be dragged or the
+        // window resized between hovers, and a scroll must not leave the
+        // bubble stranded away from the rocket.
+        window.addEventListener("scroll", () => { if (!bubble.hidden) positionBubble(); }, true);
+        window.addEventListener("resize", () => { if (!bubble.hidden) positionBubble(); });
     }
 
     //////////////////////////////////////////////////////
@@ -3255,6 +3403,119 @@ As a <role>, I want <goal> so that <benefit>.
     width:16px;
     height:16px;
     display:block;
+}
+/* Rocket becomes interactive as the hover target for the thought bubble. */
+.qa-title-icon{
+    cursor:help;
+    transition:transform .18s ease;
+}
+.qa-title-icon:hover{ transform:translateY(-2px) rotate(-8deg); }
+
+/* Comic-style thought bubble that pops out under the rocket with a random
+   motivational quote. Rendered on <body> with position:fixed so it stays
+   visible outside the panel chrome even when collapsed or docked. Two
+   stacked ::before / ::after circles form the tail so it reads as a
+   "thought" rather than a speech balloon. */
+.qa-quote-bubble{
+    /* Fallback tokens for when the bubble sits on <body> and can't inherit
+       from #qa-panel. Overridden by .qa-dark below. */
+    --qa-surface:       #ffffff;
+    --qa-text:          #1f2937;
+    --qa-border:        #dfe3e8;
+
+    position:fixed;
+    top:0;
+    left:0;
+    max-width:240px;
+    padding:8px 12px;
+    background:var(--qa-surface);
+    color:var(--qa-text);
+    border:1px solid var(--qa-border);
+    border-radius:16px;
+    font-size:12px;
+    font-weight:500;
+    line-height:1.35;
+    font-style:italic;
+    box-shadow:0 8px 24px rgba(0,0,0,.18);
+    /* Match #qa-panel's z-index so the expanded panel body doesn't cover
+       the bubble — sibling on <body>, appended after the panel, so equal
+       z-index resolves in the bubble's favour via document order. */
+    z-index:2147483647;
+    pointer-events:auto;
+    opacity:0;
+    transform:translateY(-4px) scale(.95);
+    transform-origin:top left;
+    transition:opacity .18s ease, transform .18s ease;
+}
+.qa-quote-bubble[hidden]{ display:none; }
+.qa-quote-bubble-open{
+    opacity:1;
+    transform:translateY(0) scale(1);
+}
+/* Dark-mode surface + border (mirrors the tokens in #qa-panel.qa-dark).
+   Class is applied at show time in wireQuoteBubble(). */
+.qa-quote-bubble.qa-dark{
+    --qa-surface:       #2a2f36;
+    --qa-text:          #e8eaed;
+    --qa-border:        #3a3f47;
+    box-shadow:0 8px 24px rgba(0,0,0,.45);
+}
+/* Tail: two little circles that trail from the exposed edge of the bubble
+   back toward the rocket icon. Their offset along that edge is driven by
+   --qa-tail-offset (set from JS to the icon's projected centre), so the
+   tail follows the icon even when the bubble was clamped to the viewport. */
+.qa-quote-bubble::before,
+.qa-quote-bubble::after{
+    content:"";
+    position:absolute;
+    background:var(--qa-surface);
+    border:1px solid var(--qa-border);
+    border-radius:50%;
+}
+.qa-quote-bubble::before{ width:8px; height:8px; }
+.qa-quote-bubble::after{  width:5px; height:5px; }
+
+/* Default + explicit "below": tail on the top edge, circles offset in x. */
+.qa-quote-bubble::before,
+.qa-quote-bubble[data-side="below"]::before{
+    top:-6px; bottom:auto; right:auto;
+    left:calc(var(--qa-tail-offset, 12px) - 4px);
+}
+.qa-quote-bubble::after,
+.qa-quote-bubble[data-side="below"]::after{
+    top:-13px; bottom:auto; right:auto;
+    left:calc(var(--qa-tail-offset, 12px) - 2.5px);
+}
+/* Above: tail on the bottom edge. */
+.qa-quote-bubble[data-side="above"]::before{
+    top:auto; right:auto;
+    bottom:-6px;
+    left:calc(var(--qa-tail-offset, 12px) - 4px);
+}
+.qa-quote-bubble[data-side="above"]::after{
+    top:auto; right:auto;
+    bottom:-13px;
+    left:calc(var(--qa-tail-offset, 12px) - 2.5px);
+}
+/* Right (bubble sits to the right of the icon): tail on the left edge. */
+.qa-quote-bubble[data-side="right"]::before{
+    left:-6px; right:auto; bottom:auto;
+    top:calc(var(--qa-tail-offset, 12px) - 4px);
+}
+.qa-quote-bubble[data-side="right"]::after{
+    left:-13px; right:auto; bottom:auto;
+    top:calc(var(--qa-tail-offset, 12px) - 2.5px);
+}
+/* Left (bubble sits to the left of the icon): tail on the right edge. */
+.qa-quote-bubble[data-side="left"]::before{
+    left:auto; bottom:auto;
+    right:-6px;
+    top:calc(var(--qa-tail-offset, 12px) - 4px);
+}
+.qa-quote-bubble[data-side="left"]::after{
+    left:auto; bottom:auto;
+    right:-13px;
+    top:calc(var(--qa-tail-offset, 12px) - 2.5px);
 }
 /* Vertical (rotated) collapsed strip uses writing-mode:vertical-rl on
    .qa-title — counteract the rotation on the icon so it stays upright

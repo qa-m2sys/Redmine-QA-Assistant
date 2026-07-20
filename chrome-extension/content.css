@@ -715,6 +715,123 @@
     height:16px;
     display:block;
 }
+/* Rocket becomes interactive as the hover target for the thought bubble. */
+.qa-title-icon{
+    cursor:help;
+    transition:transform .18s ease;
+}
+.qa-title-icon:hover{ transform:translateY(-2px) rotate(-8deg); }
+
+/* Comic-style thought bubble that pops out under the rocket with a random
+   motivational quote. Rendered on <body> with position:fixed so it stays
+   visible outside the panel chrome even when collapsed or docked. Two
+   stacked ::before / ::after circles form the tail so it reads as a
+   "thought" rather than a speech balloon. */
+.qa-quote-bubble{
+    /* Fallback tokens for when the bubble sits on <body> and can't inherit
+       from #qa-panel. Overridden by .qa-dark below. */
+    --qa-surface:       #ffffff;
+    --qa-text:          #1f2937;
+    --qa-border:        #dfe3e8;
+
+    position:fixed;
+    top:0;
+    left:0;
+    max-width:240px;
+    padding:8px 12px;
+    background:var(--qa-surface);
+    color:var(--qa-text);
+    border:1px solid var(--qa-border);
+    border-radius:16px;
+    font-size:12px;
+    font-weight:500;
+    line-height:1.35;
+    font-style:italic;
+    box-shadow:0 8px 24px rgba(0,0,0,.18);
+    /* Match #qa-panel's z-index so the expanded panel body doesn't cover
+       the bubble — sibling on <body>, appended after the panel, so equal
+       z-index resolves in the bubble's favour via document order. */
+    z-index:2147483647;
+    pointer-events:auto;
+    opacity:0;
+    transform:translateY(-4px) scale(.95);
+    transform-origin:top left;
+    transition:opacity .18s ease, transform .18s ease;
+}
+.qa-quote-bubble[hidden]{ display:none; }
+.qa-quote-bubble-open{
+    opacity:1;
+    transform:translateY(0) scale(1);
+}
+/* Dark-mode surface + border (mirrors the tokens in #qa-panel.qa-dark).
+   Class is applied at show time in wireQuoteBubble(). */
+.qa-quote-bubble.qa-dark{
+    --qa-surface:       #2a2f36;
+    --qa-text:          #e8eaed;
+    --qa-border:        #3a3f47;
+    box-shadow:0 8px 24px rgba(0,0,0,.45);
+}
+/* Tail: two little circles above the bubble's top-left, pointing back at
+   the rocket icon. Purely decorative — the bubble may occasionally be
+   flipped or clamped by the viewport, in which case the circles just
+   read as an accent. */
+/* Tail: two little circles that trail from the exposed edge of the bubble
+   back toward the rocket icon. Their offset along that edge is driven by
+   --qa-tail-offset (set from JS to the icon's projected centre), so the
+   tail follows the icon even when the bubble was clamped to the viewport. */
+.qa-quote-bubble::before,
+.qa-quote-bubble::after{
+    content:"";
+    position:absolute;
+    background:var(--qa-surface);
+    border:1px solid var(--qa-border);
+    border-radius:50%;
+}
+.qa-quote-bubble::before{ width:8px; height:8px; }
+.qa-quote-bubble::after{  width:5px; height:5px; }
+
+/* Default + explicit "below": tail on the top edge, circles offset in x. */
+.qa-quote-bubble::before,
+.qa-quote-bubble[data-side="below"]::before{
+    top:-6px; bottom:auto; right:auto;
+    left:calc(var(--qa-tail-offset, 12px) - 4px);
+}
+.qa-quote-bubble::after,
+.qa-quote-bubble[data-side="below"]::after{
+    top:-13px; bottom:auto; right:auto;
+    left:calc(var(--qa-tail-offset, 12px) - 2.5px);
+}
+/* Above: tail on the bottom edge. */
+.qa-quote-bubble[data-side="above"]::before{
+    top:auto; right:auto;
+    bottom:-6px;
+    left:calc(var(--qa-tail-offset, 12px) - 4px);
+}
+.qa-quote-bubble[data-side="above"]::after{
+    top:auto; right:auto;
+    bottom:-13px;
+    left:calc(var(--qa-tail-offset, 12px) - 2.5px);
+}
+/* Right (bubble sits to the right of the icon): tail on the left edge. */
+.qa-quote-bubble[data-side="right"]::before{
+    left:-6px; right:auto; bottom:auto;
+    top:calc(var(--qa-tail-offset, 12px) - 4px);
+}
+.qa-quote-bubble[data-side="right"]::after{
+    left:-13px; right:auto; bottom:auto;
+    top:calc(var(--qa-tail-offset, 12px) - 2.5px);
+}
+/* Left (bubble sits to the left of the icon): tail on the right edge. */
+.qa-quote-bubble[data-side="left"]::before{
+    left:auto; bottom:auto;
+    right:-6px;
+    top:calc(var(--qa-tail-offset, 12px) - 4px);
+}
+.qa-quote-bubble[data-side="left"]::after{
+    left:auto; bottom:auto;
+    right:-13px;
+    top:calc(var(--qa-tail-offset, 12px) - 2.5px);
+}
 /* Vertical (rotated) collapsed strip uses writing-mode:vertical-rl on
    .qa-title — counteract the rotation on the icon so it stays upright
    instead of being hidden entirely. */

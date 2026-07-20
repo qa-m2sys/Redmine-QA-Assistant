@@ -5,7 +5,21 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.2.1 — current
+## Version 6.3.0 — current
+
+### A little levity in the header
+- 🚀 **Hover the rocket for a random pep talk.** The rocket icon
+  in the panel header now hosts a small comic-style *thought bubble*
+  that pops out on hover with one of six deliberately-mediocre
+  motivational quotes ("You can do it. Maybe.", "Be unstoppable.
+  After coffee.", …). A fresh quote is picked on every hover, the
+  rocket does a little lift-off tilt while the bubble is open, and
+  the bubble lingers if you drift your cursor onto it. Pure fluff
+  — no state, no storage, no network calls.
+
+---
+
+## Version 6.2.1
 
 ### Bulk close: workflow pre-flight + smarter dropdown scrape
 - 🧪 **Pre-flight workflow check.** Ticking a card in select mode now

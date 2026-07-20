@@ -1184,7 +1184,8 @@ As a <role>, I want <goal> so that <benefit>.
 
         panel.innerHTML = `
             <div class="qa-header" id="qa-header">
-                <span class="qa-title"><span class="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
+                <span class="qa-title"><span class="qa-title-icon" id="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
+                <div class="qa-quote-bubble" id="qa-quote-bubble" role="tooltip" hidden></div>
                 <div class="qa-header-btns">
                     <button class="qa-hbtn" id="qa-accent-btn" title="Accent colour" aria-haspopup="true" aria-expanded="false">${svgIcon("palette")}</button>
                     <button class="qa-hbtn" id="qa-theme" title="Switch to dark mode">${svgIcon("moon")}</button>
@@ -2088,9 +2089,156 @@ As a <role>, I want <goal> so that <benefit>.
         applyAccent(panel, getAccent());
 
         restorePanelState(panel);
+        wireQuoteBubble(panel);
         makeDraggable(panel, document.getElementById("qa-header"));
         makeDockDraggable(panel, document.getElementById("qa-dock-face"));
         addResizeHandles(panel);
+    }
+
+    //////////////////////////////////////////////////////
+    // Rocket-icon thought bubble
+    //////////////////////////////////////////////////////
+
+    // Motivational quotes shown when the user hovers the rocket icon in
+    // the header. Purely decorative — a random one is picked on every
+    // mouseenter so repeated hovers cycle through the set.
+    const QA_QUOTES = [
+        "You can do it. Maybe.",
+        "Make it happen. Somehow.",
+        "Win or learn. Mostly learn.",
+        "Be unstoppable. After coffee.",
+        "You're not lazy. You're energy efficient.",
+        "Peak performance starts tomorrow."
+    ];
+
+    function wireQuoteBubble(panel) {
+        const icon   = panel.querySelector("#qa-title-icon");
+        const bubble = panel.querySelector("#qa-quote-bubble");
+        if (!icon || !bubble) return;
+        // Reparent to <body> so the bubble escapes the panel's overflow
+        // clipping (collapsed / docked states) and stays visible *outside*
+        // the panel chrome. Same trick the accent popover uses.
+        if (bubble.parentElement !== document.body) document.body.appendChild(bubble);
+
+        let hideTimer = null;
+
+        // Compute a fixed-position slot for the bubble relative to the
+        // rocket icon. Tries the four sides in order (below, right, left,
+        // above) and picks the first one with enough room — so a
+        // collapsed panel docked to the right edge still gets a bubble on
+        // its *left*, and one docked to the bottom flips *above* rather
+        // than being clipped by the viewport.
+        function positionBubble() {
+            const r      = icon.getBoundingClientRect();
+            const bw     = bubble.offsetWidth;
+            const bh     = bubble.offsetHeight;
+            const vw     = window.innerWidth;
+            const vh     = window.innerHeight;
+            const gap    = 12;   // distance between icon and bubble
+            const margin = 8;    // minimum breathing room from viewport edge
+
+            const spaceBelow = vh - r.bottom;
+            const spaceRight = vw - r.right;
+            const spaceLeft  = r.left;
+            const spaceAbove = r.top;
+
+            let top, left;
+            if (spaceBelow >= bh + gap + margin) {
+                top  = r.bottom + gap;
+                left = Math.min(vw - bw - margin, Math.max(margin, r.left - 4));
+            } else if (spaceRight >= bw + gap + margin) {
+                left = r.right + gap;
+                top  = Math.min(vh - bh - margin, Math.max(margin, r.top + r.height / 2 - bh / 2));
+            } else if (spaceLeft >= bw + gap + margin) {
+                left = r.left - bw - gap;
+                top  = Math.min(vh - bh - margin, Math.max(margin, r.top + r.height / 2 - bh / 2));
+            } else if (spaceAbove >= bh + gap + margin) {
+                top  = r.top - bh - gap;
+                left = Math.min(vw - bw - margin, Math.max(margin, r.left - 4));
+            } else {
+                // Truly cramped viewport — just clamp inside the visible
+                // area so the bubble stays readable even if it overlaps
+                // the icon a bit.
+                top  = Math.max(margin, Math.min(vh - bh - margin, r.bottom + gap));
+                left = Math.max(margin, Math.min(vw - bw - margin, r.left - 4));
+            }
+
+            // Derive the tail side from the FINAL bubble rect vs the icon
+            // rect — not from the branch we took. Clamping can shove the
+            // bubble sideways (e.g. panel docked right: we plan "below"
+            // but the horizontal clamp lands the bubble to the *left* of
+            // the icon), and the tail needs to point back at the rocket
+            // regardless.
+            const overlapsHoriz = left < r.right  && left + bw > r.left;
+            const overlapsVert  = top  < r.bottom && top  + bh > r.top;
+            let side;
+            if (overlapsHoriz && !overlapsVert) {
+                side = top >= r.bottom ? "below" : "above";
+            } else if (overlapsVert && !overlapsHoriz) {
+                side = left >= r.right ? "right" : "left";
+            } else if (!overlapsHoriz && !overlapsVert) {
+                // Diagonal — pick the axis with the larger separation.
+                const dx = (r.left + r.width  / 2) - (left + bw / 2);
+                const dy = (r.top  + r.height / 2) - (top  + bh / 2);
+                if (Math.abs(dx) > Math.abs(dy)) side = dx > 0 ? "left"  : "right";
+                else                             side = dy > 0 ? "above" : "below";
+            } else {
+                side = "below";
+            }
+
+            bubble.dataset.side = side;
+            // Slide the two tail circles along the bubble's exposed edge
+            // so they always sit under (or beside) the rocket, even when
+            // the bubble was horizontally clamped by the viewport. CSS
+            // reads --qa-tail-offset to place the circles.
+            const iconCenterX = r.left + r.width  / 2;
+            const iconCenterY = r.top  + r.height / 2;
+            let tailOffset;
+            if (side === "below" || side === "above") {
+                tailOffset = Math.max(12, Math.min(bw - 12, iconCenterX - left));
+            } else {
+                tailOffset = Math.max(12, Math.min(bh - 12, iconCenterY - top));
+            }
+            bubble.style.setProperty("--qa-tail-offset", tailOffset + "px");
+            bubble.style.top    = top  + "px";
+            bubble.style.left   = left + "px";
+        }
+
+        const show = () => {
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+            // Mirror the panel's theme + accent classes onto the bubble so
+            // it picks up the same tokens even though it's parented to
+            // <body> and can't inherit from #qa-panel.
+            bubble.className = "qa-quote-bubble";
+            if (panel.classList.contains("qa-dark")) bubble.classList.add("qa-dark");
+            Array.from(panel.classList).forEach(c => {
+                if (c.indexOf("qa-accent-") === 0) bubble.classList.add(c);
+            });
+            bubble.textContent = QA_QUOTES[Math.floor(Math.random() * QA_QUOTES.length)];
+            bubble.hidden = false;
+            // Measure after content is set + hidden is cleared, then place
+            // before we run the open transition so the bubble grows from
+            // its final anchor rather than sliding across the screen.
+            positionBubble();
+            requestAnimationFrame(() => bubble.classList.add("qa-quote-bubble-open"));
+        };
+        const hide = () => {
+            bubble.classList.remove("qa-quote-bubble-open");
+            hideTimer = setTimeout(() => { bubble.hidden = true; hideTimer = null; }, 180);
+        };
+        icon.addEventListener("mouseenter", show);
+        icon.addEventListener("mouseleave", hide);
+        // Keep the bubble open if the user drifts onto the bubble itself
+        // (feels less finicky, and lets long quotes stay readable).
+        bubble.addEventListener("mouseenter", () => {
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        });
+        bubble.addEventListener("mouseleave", hide);
+        // Reposition while visible — the panel might be dragged or the
+        // window resized between hovers, and a scroll must not leave the
+        // bubble stranded away from the rocket.
+        window.addEventListener("scroll", () => { if (!bubble.hidden) positionBubble(); }, true);
+        window.addEventListener("resize", () => { if (!bubble.hidden) positionBubble(); });
     }
 
     //////////////////////////////////////////////////////
