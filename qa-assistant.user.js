@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      6.3.0
+// @version      6.4.0
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -922,6 +922,44 @@ As a <role>, I want <goal> so that <benefit>.
         return true;
     }
 
+    // Update a single issue via Redmine's JSON API. Preferred over
+    // postBulkUpdate for progress reporting because it returns real
+    // per-issue success/failure with structured error messages on 422
+    // (validation), 401/403 (permission), etc. — the bulk endpoint
+    // silently redirects with 302 even when some rows were dropped.
+    async function postSingleIssueUpdate({ id, statusId, versionId, notes, csrf }) {
+        const body = { issue: { status_id: statusId } };
+        if (notes) body.issue.notes = notes;
+        if (versionId) {
+            body.issue.custom_field_values = {};
+            body.issue.custom_field_values[CLOSED_VERSION_CF_ID] = versionId;
+        }
+        const res = await fetch("/issues/" + encodeURIComponent(id) + ".json", {
+            method: "PUT",
+            credentials: "include",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": csrf,
+                "Accept": "application/json"
+            },
+            body: JSON.stringify(body)
+        });
+        if (res.ok) return true;
+        // Try to surface Redmine's own error message (422 returns
+        // { errors: ["..."] }; auth failures often return HTML or a plain
+        // {error: "..."} — fall back to the HTTP status if we can't parse).
+        let msg = "HTTP " + res.status;
+        try {
+            const data = await res.json();
+            if (data && Array.isArray(data.errors) && data.errors.length) {
+                msg = data.errors.join("; ");
+            } else if (data && data.error) {
+                msg = String(data.error);
+            }
+        } catch (_) { /* body wasn't JSON */ }
+        throw new Error(msg);
+    }
+
     //////////////////////////////////////////////////////
     // Navigation
     //////////////////////////////////////////////////////
@@ -1193,6 +1231,13 @@ As a <role>, I want <goal> so that <benefit>.
                                 <div class="qa-modal-meta-row"><strong>Version:</strong> <span id="qa-bulk-modal-version">—</span></div>
                                 <div class="qa-modal-meta-row qa-modal-note-label"><strong>Note:</strong></div>
                                 <pre class="qa-modal-note" id="qa-bulk-modal-note"></pre>
+                            </div>
+                            <div class="qa-modal-progress" id="qa-bulk-modal-progress" hidden>
+                                <div class="qa-modal-progress-header">
+                                    <span class="qa-spinner" aria-hidden="true"></span>
+                                    <span class="qa-modal-progress-text" id="qa-bulk-modal-progress-text">Closing…</span>
+                                </div>
+                                <div class="qa-modal-progress-track"><div class="qa-modal-progress-fill" id="qa-bulk-modal-progress-fill"></div></div>
                             </div>
                         </div>
                         <div class="qa-modal-actions">
@@ -1630,6 +1675,9 @@ As a <role>, I want <goal> so that <benefit>.
             const bulkModalTitle  = bulkModal && bulkModal.querySelector("#qa-bulk-modal-title");
             const bulkModalOkLbl  = bulkModal && bulkModal.querySelector("#qa-bulk-modal-confirm-label");
             const bulkModalOkBtn  = bulkModal && bulkModal.querySelector('[data-action="modal-confirm"]');
+            const bulkModalProgress     = bulkModal && bulkModal.querySelector("#qa-bulk-modal-progress");
+            const bulkModalProgressText = bulkModal && bulkModal.querySelector("#qa-bulk-modal-progress-text");
+            const bulkModalProgressFill = bulkModal && bulkModal.querySelector("#qa-bulk-modal-progress-fill");
 
             // Move the modal out of #qa-panel so backdrop-filter + overflow
             // don't clip the overlay (same trick as the accent popover).
@@ -1654,6 +1702,12 @@ As a <role>, I want <goal> so that <benefit>.
             // as cards are ticked so openBulkModal() usually has answers ready.
             let bulkWorkflowOk = new Map();
             let bulkWillCloseIds = [];       // Ids the POST will actually send
+            // Flipped to true once the confirm-click loop has finished. When
+            // set, any dismissal of the modal (Close button, backdrop, X)
+            // triggers a page reload so the board reflects the new state —
+            // and closeBulkModal() strips beforeunload guards first so the
+            // browser doesn't prompt.
+            let bulkOperationDone = false;
 
             // Ids to POST are computed at modal-open time (excludes cards that
             // are already Closed and cards whose current status has no direct
@@ -1881,6 +1935,15 @@ As a <role>, I want <goal> so that <benefit>.
                 bulkModalVer.textContent = versionLabel;
                 bulkModalNote.textContent = bulkNote.value;
                 bulkModalList.innerHTML = "";
+                // Reset progress UI — a previous close cycle may have left
+                // it in a mid-flight state if the user reopens the modal.
+                if (bulkModalProgress) {
+                    bulkModalProgress.hidden = true;
+                    bulkModalProgress.classList.remove("qa-modal-progress-done");
+                }
+                if (bulkModalProgressFill) bulkModalProgressFill.style.width = "0%";
+                if (bulkModalProgressText) bulkModalProgressText.textContent = "Closing…";
+                bulkOperationDone = false;
                 if (bulkModalSummary) {
                     bulkModalSummary.hidden = false;
                     bulkModalSummary.className = "qa-modal-summary qa-modal-summary-checking";
@@ -1921,6 +1984,7 @@ As a <role>, I want <goal> so that <benefit>.
                 ordered.forEach(id => {
                     const ctx = bulkCardCtx.get(id);
                     const li = document.createElement("li");
+                    li.dataset.issueId = String(id);
                     const a = document.createElement("a");
                     a.href = REDMINE + "/issues/" + id;
                     a.target = "_blank";
@@ -1972,6 +2036,28 @@ As a <role>, I want <goal> so that <benefit>.
 
             function closeBulkModal() {
                 if (!bulkModal) return;
+                // If the close operation ran (in full or in part), we need to
+                // refresh the board so closed cards actually disappear.
+                // Strip beforeunload guards first — Redmine's
+                // warnLeavingUnsaved and the Agile plugin's ajaxComplete
+                // hooks can leave a `beforeunload` handler installed that
+                // would otherwise show a "Leave site?" prompt.
+                if (bulkOperationDone) {
+                    try { if (bulkNote) bulkNote.value = ""; } catch (_) {}
+                    try { window.onbeforeunload = null; } catch (_) {}
+                    try {
+                        const jq = window.jQuery || window.$;
+                        if (jq) jq(window).off("beforeunload");
+                    } catch (_) {}
+                    // Capture-phase safety net: fires before any handler
+                    // Redmine may have re-added and cancels the prompt.
+                    window.addEventListener("beforeunload", (ev) => {
+                        ev.stopImmediatePropagation();
+                        delete ev.returnValue;
+                    }, { capture: true, once: true });
+                    location.reload();
+                    return;
+                }
                 bulkModal.classList.remove("qa-modal-open");
                 setTimeout(() => { bulkModal.hidden = true; }, 180);
             }
@@ -1991,41 +2077,121 @@ As a <role>, I want <goal> so that <benefit>.
                 if (bulkModalOkBtn) {
                     bulkModalOkBtn.addEventListener("click", async (e) => {
                         e.stopPropagation();
+                        // Once the operation has completed, the button turns
+                        // into a "Close window" trigger — dismiss (which
+                        // reloads via closeBulkModal) instead of running the
+                        // close loop again.
+                        if (bulkOperationDone) {
+                            closeBulkModal();
+                            return;
+                        }
                         // Send only cards the pre-flight cleared — Redmine
                         // would silently skip the rest anyway, and this way
                         // the toast + reload numbers match what the user
                         // confirmed in the modal.
                         const ids = bulkWillCloseIds.slice();
                         if (!ids.length || !bulkContext) return;
+                        // Snapshot the confirm inputs — we clear the note
+                        // textarea after the loop to defuse Redmine's
+                        // warnLeavingUnsaved guard, but every per-issue PUT
+                        // still needs the original values.
+                        const versionId = bulkVerSel.value;
+                        const notes     = bulkNote.value;
+                        const statusId  = bulkContext.closedStatusId;
+                        const csrf      = bulkContext.csrf;
+                        // Lock both action buttons for the duration — users
+                        // shouldn't be able to cancel mid-flight (some
+                        // issues would already be closed, leaving a
+                        // half-done state).
                         bulkModalOkBtn.disabled = true;
-                        try {
-                            await postBulkUpdate({
-                                ids,
-                                statusId: bulkContext.closedStatusId,
-                                versionId: bulkVerSel.value,
-                                notes: bulkNote.value,
-                                csrf: bulkContext.csrf
-                            });
-                            toast("Closing " + ids.length + " issue" + (ids.length === 1 ? "" : "s") + "…");
-                            // Clear our own note textarea and strip any
-                            // beforeunload guards (Redmine + Agile plugin
-                            // register `warnLeavingUnsaved` handlers via
-                            // jQuery on board forms; without this the
-                            // browser shows a "Leave site?" prompt when we
-                            // reload right after saving).
-                            try { if (bulkNote) bulkNote.value = ""; } catch (_) {}
-                            try { window.onbeforeunload = null; } catch (_) {}
-                            try {
-                                const jq = window.jQuery || window.$;
-                                if (jq) jq(window).off("beforeunload");
-                            } catch (_) {}
-                            // Give Redmine a beat to finish, then reload so
-                            // the closed cards actually disappear from the board.
-                            setTimeout(() => location.reload(), 400);
-                        } catch (err) {
-                            toast(err.message || "Bulk update failed");
-                            bulkModalOkBtn.disabled = false;
+                        bulkModal.querySelectorAll('[data-action="modal-cancel"]').forEach(b => { b.disabled = true; });
+                        // Reveal the progress UI and prime it at 0 %.
+                        if (bulkModalProgress) {
+                            bulkModalProgress.hidden = false;
+                            bulkModalProgress.classList.remove("qa-modal-progress-done");
                         }
+                        if (bulkModalProgressFill) bulkModalProgressFill.style.width = "0%";
+                        if (bulkModalProgressText) {
+                            bulkModalProgressText.textContent = "0 of " + ids.length + " closed…";
+                        }
+                        if (bulkModalOkLbl) bulkModalOkLbl.textContent = "Closing…";
+
+                        let done = 0;
+                        let failed = 0;
+                        for (const id of ids) {
+                            try {
+                                await postSingleIssueUpdate({
+                                    id,
+                                    statusId,
+                                    versionId,
+                                    notes,
+                                    csrf
+                                });
+                                // Mark the row as closed with a green badge.
+                                const li = bulkModalList.querySelector('li[data-issue-id="' + id + '"]');
+                                if (li) {
+                                    li.classList.add("qa-modal-list-done");
+                                    const badge = document.createElement("span");
+                                    badge.className = "qa-modal-badge qa-modal-badge-done";
+                                    badge.textContent = "closed";
+                                    li.appendChild(badge);
+                                }
+                            } catch (err) {
+                                failed += 1;
+                                const msg = err && err.message ? err.message : "Update failed";
+                                const li = bulkModalList.querySelector('li[data-issue-id="' + id + '"]');
+                                if (li) {
+                                    li.classList.add("qa-modal-list-failed");
+                                    const badge = document.createElement("span");
+                                    badge.className = "qa-modal-badge qa-modal-badge-fail";
+                                    badge.textContent = "failed";
+                                    badge.title = msg;
+                                    li.appendChild(badge);
+                                    // Inline error message so the reason is
+                                    // visible without hovering the badge.
+                                    const errNote = document.createElement("div");
+                                    errNote.className = "qa-modal-list-error";
+                                    errNote.textContent = msg;
+                                    li.appendChild(errNote);
+                                }
+                            }
+                            done += 1;
+                            const pct = Math.round((done / ids.length) * 100);
+                            if (bulkModalProgressFill) bulkModalProgressFill.style.width = pct + "%";
+                            if (bulkModalProgressText) {
+                                bulkModalProgressText.textContent = done + " of " + ids.length + " closed…";
+                            }
+                        }
+
+                        const okCount = done - failed;
+                        if (bulkModalProgressText) {
+                            bulkModalProgressText.textContent = failed
+                                ? okCount + " of " + ids.length + " closed · " + failed + " failed"
+                                : okCount + " of " + ids.length + " closed";
+                        }
+                        if (bulkModalProgress) bulkModalProgress.classList.add("qa-modal-progress-done");
+                        toast(
+                            failed
+                                ? "Closed " + okCount + " of " + ids.length + " (" + failed + " failed)"
+                                : "Closed " + okCount + " issue" + (okCount === 1 ? "" : "s")
+                        );
+                        // Defuse Redmine's warnLeavingUnsaved guard NOW so
+                        // the user can navigate away / close the tab without
+                        // hitting a browser prompt while reviewing results.
+                        try { if (bulkNote) bulkNote.value = ""; } catch (_) {}
+                        try { window.onbeforeunload = null; } catch (_) {}
+                        try {
+                            const jq = window.jQuery || window.$;
+                            if (jq) jq(window).off("beforeunload");
+                        } catch (_) {}
+                        // Repurpose the confirm button as a "Close window"
+                        // trigger and re-enable the cancel controls — the
+                        // user reviews the per-row statuses, then dismisses
+                        // (which reloads the board via closeBulkModal).
+                        bulkOperationDone = true;
+                        if (bulkModalOkLbl) bulkModalOkLbl.textContent = "Close window";
+                        bulkModalOkBtn.disabled = false;
+                        bulkModal.querySelectorAll('[data-action="modal-cancel"]').forEach(b => { b.disabled = false; });
                     });
                 }
             }
@@ -4343,9 +4509,90 @@ body.qa-selecting .agile-issue{
     min-width:auto;
     padding:6px 14px;
 }
+.qa-modal-progress{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    padding:8px 10px;
+    border-radius:var(--qa-r-md);
+    background:var(--qa-surface-alt);
+    border:1px solid var(--qa-border);
+}
+.qa-modal-progress[hidden]{ display:none; }
+.qa-modal-progress-header{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:12px;
+    color:var(--qa-text);
+}
+.qa-modal-progress-text{ font-variant-numeric:tabular-nums; }
+.qa-modal-progress-track{
+    position:relative;
+    height:6px;
+    border-radius:999px;
+    background:var(--qa-border);
+    overflow:hidden;
+}
+.qa-modal-progress-fill{
+    height:100%;
+    width:0%;
+    background:var(--qa-accent, #3b82f6);
+    border-radius:999px;
+    transition:width 180ms ease-out;
+}
+.qa-spinner{
+    display:inline-block;
+    width:12px;
+    height:12px;
+    border-radius:50%;
+    border:2px solid var(--qa-border);
+    border-top-color:var(--qa-accent, #3b82f6);
+    animation:qa-spin 700ms linear infinite;
+}
+@keyframes qa-spin{
+    to { transform:rotate(360deg); }
+}
+.qa-modal-badge-done{
+    background:#e6f4ea;
+    color:#1e7a3a;
+    border:1px solid #b6e0c2;
+}
+.qa-modal-overlay.qa-dark .qa-modal-badge-done{
+    background:#1f3a29;
+    color:#8bd6a5;
+    border-color:#2f5a3d;
+}
+.qa-modal-badge-fail{
+    background:#fde8e8;
+    color:#a41c1c;
+    border:1px solid #f4b4b4;
+}
+.qa-modal-overlay.qa-dark .qa-modal-badge-fail{
+    background:#3a1e1e;
+    color:#ffb4b4;
+    border-color:#6a2f2f;
+}
+.qa-modal-list-done{ opacity:0.85; }
+.qa-modal-list-failed{ background:rgba(220, 38, 38, 0.05); }
+.qa-modal-overlay.qa-dark .qa-modal-list-failed{ background:rgba(220, 38, 38, 0.12); }
+.qa-modal-list-error{
+    display:block;
+    margin-top:3px;
+    padding-left:2px;
+    font-size:11px;
+    line-height:1.4;
+    color:#a41c1c;
+    font-style:italic;
+    word-break:break-word;
+}
+.qa-modal-overlay.qa-dark .qa-modal-list-error{ color:#ff8a80; }
+.qa-modal-progress-done .qa-spinner{ display:none; }
 
 @media (prefers-reduced-motion:reduce){
     .qa-modal-overlay, .qa-modal{ transition:none; }
+    .qa-modal-progress-fill{ transition:none; }
+    .qa-spinner{ animation:none; }
 }
 
 .qa-ai-chat{

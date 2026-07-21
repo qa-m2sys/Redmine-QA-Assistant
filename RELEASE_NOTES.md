@@ -5,7 +5,46 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.3.0 — current
+## Version 6.4.0 — current
+
+### Bulk close: live per-issue progress + no more "Leave site?" prompt
+- 📊 **Live progress bar and per-row status.** Clicking **Close them**
+  in the confirmation modal now shows a progress row with a spinner,
+  a running counter (`3 of 10 closed…`), and a fill bar that updates
+  after every issue. The modal **stays open** when the loop finishes
+  so you can review every row — successful issues get a green
+  *closed* badge, failures get a red *failed* badge **plus the exact
+  error message Redmine returned** (`Status is invalid`,
+  `Version can't be blank`, `HTTP 403`, …) rendered inline under the
+  issue's subject in italic red. The Close button relabels to *Close
+  window* and dismissing the modal reloads the board so closed cards
+  actually disappear.
+- 🔌 **Per-issue JSON API instead of the batch endpoint.** Under the
+  hood the panel now calls `PUT /issues/:id.json` once per selected
+  issue instead of a single `POST /issues/bulk_update` for the whole
+  batch. The batch endpoint responds with `302 → /issues` even when
+  Redmine silently dropped rows (permission, workflow rule, missing
+  required field), so failures used to disappear into a
+  false-positive success toast. The JSON endpoint returns real
+  `200`/`204` on success and structured `422` errors on failure, which
+  is what powers the accurate per-row status.
+- 🔇 **No more browser reload confirmation prompt.** Redmine and the
+  Agile plugin install `warnLeavingUnsaved` guards on board forms
+  that used to fire when we reloaded after saving — the browser
+  showed *"Leave site? Changes you made may not be saved."* every
+  time (especially for larger batches, where the plugin's
+  ajaxComplete hooks had a chance to re-attach the guard between
+  saving and reloading). The panel now defuses the guards
+  immediately after the close loop, again right before the reload,
+  and installs a capture-phase safety net that cancels any handler
+  Redmine adds in between. Silent reload for every batch size.
+- ⏸️ Both the confirm and cancel buttons lock while the close loop
+  is running — you can't dismiss the modal mid-flight and end up
+  with a half-closed batch you can't see.
+
+---
+
+## Version 6.3.0
 
 ### A little levity in the header
 - 🚀 **Hover the rocket for a random pep talk.** The rocket icon

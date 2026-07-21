@@ -1633,9 +1633,90 @@ body.qa-selecting .agile-issue{
     min-width:auto;
     padding:6px 14px;
 }
+.qa-modal-progress{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    padding:8px 10px;
+    border-radius:var(--qa-r-md);
+    background:var(--qa-surface-alt);
+    border:1px solid var(--qa-border);
+}
+.qa-modal-progress[hidden]{ display:none; }
+.qa-modal-progress-header{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:12px;
+    color:var(--qa-text);
+}
+.qa-modal-progress-text{ font-variant-numeric:tabular-nums; }
+.qa-modal-progress-track{
+    position:relative;
+    height:6px;
+    border-radius:999px;
+    background:var(--qa-border);
+    overflow:hidden;
+}
+.qa-modal-progress-fill{
+    height:100%;
+    width:0%;
+    background:var(--qa-accent, #3b82f6);
+    border-radius:999px;
+    transition:width 180ms ease-out;
+}
+.qa-spinner{
+    display:inline-block;
+    width:12px;
+    height:12px;
+    border-radius:50%;
+    border:2px solid var(--qa-border);
+    border-top-color:var(--qa-accent, #3b82f6);
+    animation:qa-spin 700ms linear infinite;
+}
+@keyframes qa-spin{
+    to { transform:rotate(360deg); }
+}
+.qa-modal-badge-done{
+    background:#e6f4ea;
+    color:#1e7a3a;
+    border:1px solid #b6e0c2;
+}
+.qa-modal-overlay.qa-dark .qa-modal-badge-done{
+    background:#1f3a29;
+    color:#8bd6a5;
+    border-color:#2f5a3d;
+}
+.qa-modal-badge-fail{
+    background:#fde8e8;
+    color:#a41c1c;
+    border:1px solid #f4b4b4;
+}
+.qa-modal-overlay.qa-dark .qa-modal-badge-fail{
+    background:#3a1e1e;
+    color:#ffb4b4;
+    border-color:#6a2f2f;
+}
+.qa-modal-list-done{ opacity:0.85; }
+.qa-modal-list-failed{ background:rgba(220, 38, 38, 0.05); }
+.qa-modal-overlay.qa-dark .qa-modal-list-failed{ background:rgba(220, 38, 38, 0.12); }
+.qa-modal-list-error{
+    display:block;
+    margin-top:3px;
+    padding-left:2px;
+    font-size:11px;
+    line-height:1.4;
+    color:#a41c1c;
+    font-style:italic;
+    word-break:break-word;
+}
+.qa-modal-overlay.qa-dark .qa-modal-list-error{ color:#ff8a80; }
+.qa-modal-progress-done .qa-spinner{ display:none; }
 
 @media (prefers-reduced-motion:reduce){
     .qa-modal-overlay, .qa-modal{ transition:none; }
+    .qa-modal-progress-fill{ transition:none; }
+    .qa-spinner{ animation:none; }
 }
 
 .qa-ai-chat{

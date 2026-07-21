@@ -73,8 +73,8 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
 - New **"Close multiple issues"** section that appears in the panel on any `/projects/<x>/agile/board` page.
 - Click **Enter select mode** and every card on the board grows a small checkbox in its top-right corner — tick as many as you need.
 - Pick a **Closed Version** and edit the auto-generated note (same textarea + template as the single-issue close).
-- Click **Close N issues…** to open a themed confirmation modal listing every selected issue by ID and subject, the picked version, and the exact note that will be posted. Cancel any time; confirm to send one round-trip to Redmine's built-in `bulk_update` endpoint (session cookies + CSRF, no extra permissions).
-- On success the board reloads so the closed cards actually disappear.
+- Click **Close N issues…** to open a themed confirmation modal listing every selected issue by ID and subject, the picked version, and the exact note that will be posted. Cancel any time; confirm to close each issue via Redmine's JSON API (`PUT /issues/:id.json`, session cookies + CSRF, no extra permissions) with a **live progress bar** and per-row status — successful issues get a green *closed* badge, failures get a red *failed* badge with Redmine's actual error message rendered inline. The modal stays open when the loop finishes so you can review every row, and the *Close window* button reloads the board so the closed cards actually disappear — no browser "Leave site?" prompt at any point.
+- On success the board reloads (via the *Close window* button) so the closed cards actually disappear — with no browser reload-confirmation prompt.
 
 ### ⌨️ Keyboard-first workflow
 - <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>4</kbd> — open Web / Backend / iOS / Android New-issue form.
@@ -174,9 +174,15 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a full history of what changed in e
   and (optionally) tweak the auto-generated note. A themed confirmation
   modal lists every selected issue with its ID + subject and previews the
   exact note that will be posted, so nothing goes out without a full
-  review. Confirming POSTs to Redmine's built-in `bulk_update` endpoint
-  in a single round-trip (session cookies + CSRF, no extra permissions)
-  and reloads the board on success so the closed cards actually disappear.
+  review. Confirming closes each issue via Redmine's JSON API
+  (`PUT /issues/:id.json`, session cookies + CSRF, no extra permissions)
+  with a **live progress bar** and per-row status — successful rows get a
+  green *closed* badge, failures get a red *failed* badge with Redmine's
+  actual error message rendered inline (`Status is invalid`,
+  `Version can't be blank`, …). The modal stays open when the loop
+  finishes so you can review every row; the *Close window* button reloads
+  the board so closed cards actually disappear — with no browser
+  reload-confirmation prompt at any point.
 - **Toast notifications** — Small confirmations for every action.
 - **Floating, draggable panel** — Drag the panel anywhere on screen; its
   position is remembered.
