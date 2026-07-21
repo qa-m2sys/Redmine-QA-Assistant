@@ -2007,6 +2007,18 @@ As a <role>, I want <goal> so that <benefit>.
                                 csrf: bulkContext.csrf
                             });
                             toast("Closing " + ids.length + " issue" + (ids.length === 1 ? "" : "s") + "…");
+                            // Clear our own note textarea and strip any
+                            // beforeunload guards (Redmine + Agile plugin
+                            // register `warnLeavingUnsaved` handlers via
+                            // jQuery on board forms; without this the
+                            // browser shows a "Leave site?" prompt when we
+                            // reload right after saving).
+                            try { if (bulkNote) bulkNote.value = ""; } catch (_) {}
+                            try { window.onbeforeunload = null; } catch (_) {}
+                            try {
+                                const jq = window.jQuery || window.$;
+                                if (jq) jq(window).off("beforeunload");
+                            } catch (_) {}
                             // Give Redmine a beat to finish, then reload so
                             // the closed cards actually disappear from the board.
                             setTimeout(() => location.reload(), 400);
