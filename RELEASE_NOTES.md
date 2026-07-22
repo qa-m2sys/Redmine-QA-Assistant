@@ -5,7 +5,38 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.4.0 — current
+## Version 6.4.1 — current
+
+### OpenAI key moved to extension-isolated storage
+- 🔒 **The OpenAI API key no longer lives in Redmine's `localStorage`.**
+  Previously the key was stored under `qa-openai-key` on the
+  `redmine.kernello.com` origin, which meant any script that ran on the
+  page — a Redmine XSS, a compromised plugin, or any other Chrome
+  extension with content-script access to Redmine — could read it with a
+  single `localStorage.getItem` call. The Chrome extension now stores the
+  key in `chrome.storage.local` (extension-isolated, separate LevelDB per
+  extension id; unreachable from page scripts) and the userscript now
+  stores it via `GM_getValue` / `GM_setValue` (userscript-manager
+  isolated storage).
+- 🔁 **Automatic migration on first load.** Any key that a pre-6.4.1
+  build wrote to page-origin `localStorage` is moved into the isolated
+  store on first read and then wiped from `localStorage`, so leaving a
+  copy behind can't defeat the new isolation. No user action required —
+  reload Redmine after installing 6.4.1 and the key that was already
+  saved keeps working.
+- 🧩 **Extension permission added: `"storage"`.** Chrome will show a
+  one-time "This extension has been updated and now requires new
+  permissions: **Store client-side data**" prompt on the first update.
+  Grant it — the extension can't read/write your key without it.
+- 📜 **Userscript grants added: `GM_getValue` / `GM_setValue` /
+  `GM_deleteValue`.** Tampermonkey / Violentmonkey will show the usual
+  "new permissions required" dialog on first update; accept it. If you
+  install the raw `.user.js`, your userscript manager handles this
+  automatically.
+
+---
+
+## Version 6.4.0
 
 ### Bulk close: live per-issue progress + no more "Leave site?" prompt
 - 📊 **Live progress bar and per-row status.** Clicking **Close them**

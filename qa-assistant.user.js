@@ -1,11 +1,14 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      6.4.0
+// @version      6.4.1
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @connect      api.openai.com
 // ==/UserScript==
 
@@ -309,10 +312,37 @@ As a <role>, I want <goal> so that <benefit>.
     // AI assistant (OpenAI)
     //////////////////////////////////////////////////////
 
+    // The OpenAI key lives in the userscript manager's isolated storage
+    // (GM_getValue / GM_setValue, scoped per-userscript) rather than
+    // window.localStorage on the Redmine origin. Why: page-origin
+    // localStorage can be read by any script that ends up running on
+    // Redmine — a Redmine XSS, a compromised plugin, or any other
+    // userscript / extension that has access to this origin. GM storage
+    // is scoped to this userscript and unreachable from the page world.
+    //
+    // Any legacy value that a pre-6.4.1 version wrote to localStorage is
+    // migrated on first read and then wiped — leaving it there would
+    // defeat the whole point of the move.
+    (function migrateLegacyAiKey() {
+        if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") return;
+        let legacy = "";
+        try { legacy = (localStorage.getItem(STORAGE.aiKey) || "").trim(); } catch (_) {}
+        if (!legacy) return;
+        const current = (GM_getValue("qa-openai-key", "") || "").trim();
+        if (!current) GM_setValue("qa-openai-key", legacy);
+        try { localStorage.removeItem(STORAGE.aiKey); } catch (_) {}
+    })();
+
     const AI = {
-        key:   () => (localStorage.getItem(STORAGE.aiKey) || "").trim(),
+        key: () => {
+            if (typeof GM_getValue !== "function") return "";
+            return (GM_getValue("qa-openai-key", "") || "").trim();
+        },
         model: () => (localStorage.getItem(STORAGE.aiModel) || AI_DEFAULT_MODEL),
-        setKey: (k) => localStorage.setItem(STORAGE.aiKey, (k || "").trim())
+        setKey: (k) => {
+            if (typeof GM_setValue !== "function") return;
+            GM_setValue("qa-openai-key", (k || "").trim());
+        }
     };
 
     // Returns the tracker key that best matches what is being reported: prefer the

@@ -303,11 +303,49 @@ As a <role>, I want <goal> so that <benefit>.
     // AI assistant (OpenAI)
     //////////////////////////////////////////////////////
 
+    // The OpenAI key lives in chrome.storage.local (extension-isolated,
+    // separate DB per extension id) rather than window.localStorage on the
+    // Redmine origin. Why: page-origin localStorage can be read by any
+    // script that ends up running on Redmine — a Redmine XSS, a
+    // compromised plugin, or any other Chrome extension that has a content
+    // script on this origin. chrome.storage.local is scoped to the
+    // extension and unreachable from the page world.
+    //
+    // A cached copy is kept in-memory so the (many) synchronous callers of
+    // AI.key() don't have to become async. loadAiSettings() populates it
+    // at boot and also migrates any legacy key that was written to
+    // localStorage by pre-6.4.1 versions of the extension.
+    let cachedAiKey = "";
     const AI = {
-        key:   () => (localStorage.getItem(STORAGE.aiKey) || "").trim(),
+        key:   () => cachedAiKey,
         model: () => (localStorage.getItem(STORAGE.aiModel) || AI_DEFAULT_MODEL),
-        setKey: (k) => localStorage.setItem(STORAGE.aiKey, (k || "").trim())
+        setKey: (k) => {
+            cachedAiKey = (k || "").trim();
+            try { chrome.storage.local.set({ "qa-openai-key": cachedAiKey }); } catch (_) {}
+        }
     };
+
+    // Load the persisted key from extension-isolated storage. Also migrate
+    // any legacy value that pre-6.4.1 wrote to page-origin localStorage,
+    // then wipe it — leaving it there would defeat the whole point of the
+    // move (a Redmine XSS could still steal it).
+    async function loadAiSettings() {
+        try {
+            const stored = await chrome.storage.local.get("qa-openai-key");
+            cachedAiKey = (stored && stored["qa-openai-key"]) || "";
+        } catch (_) { cachedAiKey = ""; }
+        let legacy = "";
+        try { legacy = (localStorage.getItem(STORAGE.aiKey) || "").trim(); } catch (_) {}
+        if (legacy) {
+            if (!cachedAiKey) {
+                cachedAiKey = legacy;
+                try { await chrome.storage.local.set({ "qa-openai-key": legacy }); } catch (_) {}
+            }
+            // Whether or not we migrated it, the legacy copy must not
+            // linger on the page origin.
+            try { localStorage.removeItem(STORAGE.aiKey); } catch (_) {}
+        }
+    }
 
     // Returns the tracker key that best matches what is being reported: prefer the
     // tracker actually selected in the Redmine issue form, then the panel choice.
@@ -2921,6 +2959,20 @@ As a <role>, I want <goal> so that <benefit>.
         if (qaInitialized) return;
         qaInitialized = true;
         loadModernFont();
+        // Kick off the async key load (chrome.storage.local + legacy
+        // migration). The panel is built synchronously; if the key had
+        // already been saved, refreshKeyRow() re-renders the "key saved"
+        // row as soon as the load resolves so the user doesn't see a
+        // stale "paste your key" prompt for a frame.
+        loadAiSettings().then(() => {
+            const row = document.getElementById("qa-ai-key-saved");
+            const edit = document.getElementById("qa-ai-key-edit");
+            if (row && edit) {
+                const hasKey = !!cachedAiKey;
+                row.hidden = !hasKey;
+                edit.hidden = hasKey;
+            }
+        });
         createPanel();
         initShortcuts();
         consumeProjectHash();
