@@ -1342,6 +1342,43 @@
 .qa-bulk-close-wrap[hidden]{ display:none; }
 .qa-bulk-close-wrap .qa-ai-model-row{ margin-top:2px; margin-bottom:6px; }
 .qa-bulk-fields[hidden]{ display:none; }
+/* Show Reopened Issues section mirrors the bulk-close chrome. */
+.qa-reopened-wrap[hidden]{ display:none; }
+/* Row wrapper for the reopened button. Deliberately NOT reusing
+   `.qa-template-actions` because that one has a container query
+   that hides `.qa-btn-label` in narrow panels (< 340px) — which
+   would collapse this button to icon-only. This row keeps the
+   label visible at all panel widths. */
+.qa-reopened-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.qa-reopened-row .qa-tmpl-btn{
+    flex:1 1 auto;
+}
+/* Loader state — while `#qa-show-reopened.qa-loading` is applied by the
+   click handler, spin the button's icon so users get an unambiguous
+   "yes, work is happening" signal during the multi-second sprint scan.
+   `rotate-ccw` is the perfect icon for this: the arrow already implies
+   motion, so the animation reads as intentional rather than glitchy.
+   Slightly dim the label + reduce opacity to reinforce the disabled
+   feel without hiding the "Scanning X of Y…" progress text the JS
+   updates every batch. */
+@keyframes qa-btn-spin{
+    from{ transform:rotate(0deg); }
+    to{ transform:rotate(-360deg); }
+}
+.qa-btn.qa-loading{
+    cursor:progress;
+}
+.qa-btn.qa-loading .qa-btn-icon{
+    animation:qa-btn-spin 0.9s linear infinite;
+    transform-origin:50% 50%;
+}
+.qa-btn.qa-loading .qa-btn-label{
+    opacity:0.85;
+}
 
 .qa-bulk-toggle-row{
     display:flex;
@@ -1712,6 +1749,81 @@ body.qa-selecting .agile-issue{
 }
 .qa-modal-overlay.qa-dark .qa-modal-list-error{ color:#ff8a80; }
 .qa-modal-progress-done .qa-spinner{ display:none; }
+
+/* Reopened-issues modal — the list can grow long (whole sprint's
+   worth of issues that ever hit Reopen), so we give the modal a
+   taller footprint than the bulk-close confirmation. The list
+   itself gets a much larger scroll region so ~15 rows are visible
+   before the user has to scroll. */
+#qa-reopened-modal .qa-modal{
+    min-height:min(720px, calc(100vh - 64px));
+    width:min(520px, 100%);
+}
+#qa-reopened-modal .qa-modal-body{
+    flex:1 1 auto;
+}
+#qa-reopened-modal .qa-modal-list-reopened{
+    max-height:none;
+    flex:1 1 auto;
+    min-height:360px;
+}
+/* Full subjects — the shared `.qa-modal-list-subject` rule clamps
+   to 2 lines with an ellipsis (good for the bulk-close preview
+   where users just need to scan ids). In the reopened-issues
+   modal the whole point is inspection, so we let the subject
+   wrap freely and swap the row alignment to top so long titles
+   don't drag the badge off centre. */
+#qa-reopened-modal .qa-modal-list li{
+    align-items:flex-start;
+}
+#qa-reopened-modal .qa-modal-list-subject{
+    display:block;
+    -webkit-line-clamp:unset;
+    line-clamp:unset;
+    -webkit-box-orient:unset;
+    overflow:visible;
+    text-overflow:clip;
+    white-space:normal;
+}
+/* "Partially synced" warning strip — shown between the button
+   and the next section whenever the last scan for the current
+   sprint hit the wall-clock cap. Amber tint so it reads as an
+   action-required nudge without alarming users. */
+.qa-reopened-warn{
+    margin-top:8px;
+    padding:6px 10px;
+    border-radius:var(--qa-r-md);
+    background:#fff3cd;
+    color:#8a5a00;
+    border:1px solid #f0d47a;
+    font-size:11px;
+    line-height:1.4;
+}
+.qa-panel.qa-dark .qa-reopened-warn{
+    background:#4a3a1a;
+    color:#ffcc80;
+    border-color:#6b5220;
+}
+.qa-reopened-warn[hidden]{ display:none; }
+/* Total-reopened counter pill shown next to the modal title. */
+.qa-modal-count-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:22px;
+    height:20px;
+    padding:0 8px;
+    margin-left:8px;
+    border-radius:999px;
+    background:var(--qa-brand-tint);
+    color:var(--qa-brand-strong);
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.2px;
+    font-variant-numeric:tabular-nums;
+    vertical-align:middle;
+}
+.qa-modal-count-badge[hidden]{ display:none; }
 
 @media (prefers-reduced-motion:reduce){
     .qa-modal-overlay, .qa-modal{ transition:none; }

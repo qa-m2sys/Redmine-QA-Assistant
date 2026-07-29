@@ -5,7 +5,364 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.4.5 — current
+## Version 6.5.13 — current
+
+### Show Reopened Issues: Copy list button
+- 📋 **New "Copy list" button** in the reopened-issues modal
+  footer (next to Close). Copies the entire currently-displayed
+  list to the clipboard in **two formats simultaneously** via a
+  `ClipboardItem`:
+  - **`text/html`** → `<a href="https://redmine.kernello.com/issues/1234">#1234</a> - Subject text`
+    per line, so pasting into rich targets (Word, Outlook,
+    Redmine wiki editors, Confluence) keeps every issue id as a
+    clickable hyperlink.
+  - **`text/plain`** → `#1234 - Subject text (https://redmine.kernello.com/issues/1234)`
+    per line, so plain-text targets (Notepad, terminals) still
+    get a usable URL.
+- 🩹 **Automatic fallback** to `navigator.clipboard.writeText`
+  on older browsers that don't ship `ClipboardItem`.
+- 🔔 Toast confirmation shows the exact count copied — *"Copied
+  N issues"* — with proper singular/plural.
+- 🧠 Modal caches `reopenedCurrentRows` on every open so the
+  Copy button always serializes what the user is actually
+  looking at, even after a resume scan adds more rows.
+
+---
+
+## Version 6.5.12
+
+### Show Reopened Issues: label actually renders
+- 🐛 **Fixed the invisible button label**. The reopened button
+  was wrapped in `.qa-template-actions`, which sets
+  `container-type: inline-size` and has a `@container
+  (max-width: 340px)` rule that hides every `.qa-btn-label`
+  inside it — so the label collapsed to icon-only in the QA
+  panel (which is ~300px wide). The "Enter select mode" button
+  sits inside `.qa-bulk-toggle-row` and dodges the rule; the
+  reopened row did not.
+- 🩹 **Fix — dedicated wrapper**. Introduced `.qa-reopened-row`
+  (plain flex, no container query) so the *Get Reopened Issues*
+  label stays visible at every panel width.
+
+---
+
+## Version 6.5.11
+
+### Show Reopened Issues: label goes inside the button
+- 🏷️ **Renamed button label** to **"Get Reopened Issues"** and
+  moved it back inside the button next to the icon, matching
+  the style of the "Enter select mode" bulk-close button. The
+  separate `.qa-reopened-hint` span introduced in 6.5.9 is gone
+  — one clear call-to-action instead of a button + external
+  label.
+- 🧹 Dropped the now-unused `.qa-reopened-actions` /
+  `.qa-reopened-hint` CSS from both `content.css` and the
+  userscript so the stylesheet stays lean.
+- 🔁 Updated the `finally` block's fallback text so the label
+  restores to *"Get Reopened Issues"* after a scan.
+
+---
+
+## Version 6.5.10
+
+### Show Reopened Issues: partial-sync warning strip
+- ⚠️ **New amber "Partially synced" warning** rendered below the
+  button whenever the last scan of the current sprint hit the
+  3-minute wall-clock cap. Text: *"Partially synced. Please
+  sync again to get remaining issues."* Hidden automatically
+  once a subsequent scan completes cleanly. Dark-mode variant
+  included.
+- 🧩 **Wired at every scan outcome** via a small
+  `updateReopenedWarn(result)` helper — invoked after fresh
+  scans, resume passes, and cache-hit-complete short-circuits
+  — so the strip is always in sync with the actual state of
+  the cache. `role="status"` so screen readers announce it
+  after each pass.
+
+---
+
+## Version 6.5.9
+
+### Show Reopened Issues: label + full subjects
+- 🏷️ **"Get Reopened Issues" hint text beside the button** in the
+  QA panel so the action is discoverable even when the button
+  chrome is scanned quickly. Rendered as a subtle muted-tone
+  label to the right of the button; wraps under the button on
+  narrow panels.
+- 📝 **Long subjects render in full inside the reopened-issues
+  modal**. The shared `.qa-modal-list-subject` rule clamps to
+  two lines with an ellipsis (correct for the bulk-close
+  confirmation preview), but that hid useful context in the
+  reopened list. Scoped override under `#qa-reopened-modal`
+  disables the line-clamp, drops the ellipsis, and switches the
+  row `align-items` to `flex-start` so multi-line titles keep
+  the id + status badge visually anchored.
+
+---
+
+## Version 6.5.8
+
+### Show Reopened Issues: polish pass
+- 🔄 **Spinner rotation direction fixed**. The `rotate-ccw`
+  Feather icon shows an arrow curving counter-clockwise, but the
+  `qa-btn-spin` keyframe was rotating it *clockwise* — which
+  looked broken (arrow pointing one way, motion the other).
+  Flipped the animation to `-360deg` so the icon spins in the
+  direction it visually points.
+- 🔢 **Total-reopened counter** shown as a pill badge next to
+  the "Reopened issues" modal title, e.g. **Reopened issues [8]**.
+  Uses `rows.length` so it always matches what's rendered (Phase
+  A + Phase B combined). Auto-hides when the count is zero.
+- 📏 **Modal is ~2× taller**. `#qa-reopened-modal .qa-modal` now
+  has `min-height: min(720px, calc(100vh - 64px))` and the
+  scrollable list `min-height: 360px` with no `max-height`
+  ceiling, so about 15 rows are visible before the user needs
+  to scroll. Modal width nudged from 440px to 520px to keep the
+  aspect ratio comfortable.
+
+---
+
+## Version 6.5.7
+
+### Show Reopened Issues: resume-on-reclick + faster scan
+- 🐛 **Fixed the "re-click just re-shows the same partial modal"
+  bug**. In 6.5.6 the timed-out result was cached and every
+  subsequent click read straight from that cache, so users could
+  never make progress past the first 168-of-347 pass. The modal
+  even *told* them to "re-run to continue" but the code did the
+  opposite.
+- 🧭 **Fix — full resume support**. `fetchReopenedIssues` now
+  returns a checkpoint snapshot (Phase-A hits, the full candidate
+  list, the set of already-scanned ids, and the historical
+  matches found so far) whenever it times out. The click handler:
+  - **Skips the cache** when the cached result is a partial one,
+  - **Passes it as `prevPartial`** to the next fetch, and
+  - The fetch **reuses Phase A + Phase B** and only journal-scans
+    the candidates whose ids aren't in the prev-scanned set.
+  Each click chips a further 3-minute chunk off the remaining
+  work until the whole sprint is scanned. No wasted HTTP,
+  historical hits accumulate across passes.
+- ⚡ **Faster per pass**: journal-scan concurrency bumped
+  `8 → 12`, wall-clock cap bumped `2 min → 3 min`. On the
+  reported 347-issue sprint this fits the whole scan in roughly
+  two clicks instead of "forever".
+- 💬 **Better modal copy** on partial results — no more misleading
+  "re-run to continue where the cache leaves off" (which was
+  literally impossible in 6.5.6). Now reads *"Partial result:
+  scanned N of M sprint issues so far. Close and click the button
+  again to resume where this pass left off."*
+- 🩺 **New console log** `[QA Assistant] Cache hit (partial) —
+  resuming scan from X / Y` so you can see the resume path is
+  being taken.
+
+---
+
+## Version 6.5.6
+
+### Show Reopened Issues: modal now actually appears
+- 🐛 **Fixed the modal being invisible when the scan finished
+  successfully** — reported from a 347-issue sprint where the
+  console logged `openReopenedModal rows = 8` but nothing
+  visible showed up. Setting `hidden=false` alone wasn't
+  enough: `.qa-modal-overlay` has `opacity:0` baked into its
+  base rule (for the fade-in transition), and only becomes
+  visible when the `.qa-modal-open` class is added on the
+  next animation frame. The bulk-close modal already did
+  this; the reopened modal was missing both steps.
+- 🧭 **Fix — mirror the bulk-close open/close dance exactly**:
+  - `openReopenedModal`: reset `className`, mirror the panel's
+    `qa-dark` + `qa-accent-*` classes onto the detached
+    overlay (CSS custom props on the panel don't cascade to
+    `<body>`-mounted overlays), set `hidden=false`, then
+    `requestAnimationFrame(() => classList.add("qa-modal-open"))`
+    so the opacity transition animates from 0→1 instead of snapping.
+  - `closeReopenedModal`: `classList.remove("qa-modal-open")`
+    to trigger the fade-out, then `setTimeout(180ms)` before
+    `hidden=true` so the transition can play.
+- 🩺 **New console log** `[QA Assistant] openReopenedModal
+  rows = N` confirms the modal open path was taken, so future
+  "invisible modal" reports can be triaged in one glance.
+
+---
+
+## Version 6.5.5
+
+### Show Reopened Issues: spinning-icon loader on the button
+- ✨ **The button's `rotate-ccw` icon now spins as a loader while
+  the sprint scan is running.** Large sprints (100–350+ issues)
+  can take upwards of 30–60 seconds to journal-scan; the label
+  already updated with "Scanning X of Y…" progress, but there was
+  no ambient "still working" cue and the button *felt* dead. A
+  0.9 s linear-infinite rotation on `.qa-btn-icon` — plus a
+  `cursor:progress` and slightly dimmed label — makes the
+  in-flight state unmistakable at a glance.
+- 🎨 **Implementation**: pure CSS keyframe animation (`@keyframes
+  qa-btn-spin`) triggered by a `.qa-loading` class the click
+  handler toggles on/off around the `fetchReopenedIssues` await.
+  No JS animation loop, no image swap — just a class flip in the
+  same `finally` block that restores the label and the disabled
+  state, so every exit path (success, empty result, error, cache
+  hit) cleans up identically.
+
+---
+
+## Version 6.5.4
+
+### Show Reopened Issues: paginate + higher concurrency + hard time cap
+- 🐛 **Fixed the button appearing frozen on large sprints** (report
+  after 6.5.3). Diagnostics from a 347-issue sprint showed we only
+  ever fetched the first 100 rows (Redmine's `per_page` cap) and
+  the follow-up journal scan at 5-concurrency was slow enough that
+  the button *felt* dead — no visible change for a minute or more.
+- 🧭 **Fix — three changes to `fetchReopenedIssues`**:
+  - **Paginate** both Phase A and Phase B sprint-list queries.
+    We now loop `?page=1..N` until we've pulled every row Redmine
+    says exists (safety cap at 20 pages = 2 000 issues). A
+    347-issue sprint now scans all 347, not just the first 100.
+  - **Bump journal-scan concurrency** from 5 to 8 parallel
+    `/issues/<id>` fetches. Faster wall-clock time without
+    hammering Redmine hard enough to trip a WAF.
+  - **Hard 2-minute wall-clock cap** on the journal scan.
+    If a really huge sprint (or a slow Redmine) blows through
+    the budget, we return what we scanned so far and flag the
+    partial result in the modal footer — a partial answer is
+    strictly better than a silent freeze.
+- 🩺 **More granular diagnostics** in the browser console:
+  per-page pagination counts, per-batch scan timings, running
+  hit counts, and a final scan-duration summary. If the scan
+  ever feels slow again the console immediately shows *why*.
+- 📄 **Modal footer** now distinguishes between "list capped"
+  (Redmine returned fewer rows than expected) and "scan timed
+  out" (2-minute cap tripped) so the truncation reason is
+  transparent.
+
+---
+
+## Version 6.5.3
+
+### Show Reopened Issues: hardcode the known status id + add diagnostics
+- 🐛 **Fixed the "pressing the button does nothing" report from
+  6.5.2**, where the click seemed silent — no modal, no toast,
+  no visible change on some boards. The regex-only scan in
+  6.5.2 still relied on parsing every sprint issue's journal
+  page, and on larger sprints the wait was long enough (or
+  transient errors were swallowed quietly enough) that users
+  couldn't tell whether the button had done *anything*.
+- 🧭 **Fix — two-phase query with a hardcoded status id.** The
+  user confirmed the `Development: Reopen` status is id `8`
+  on every Redmine instance this extension targets, so we now:
+  - **Phase A**: run one direct filter query
+    (`?f[]=status_id&op[status_id]==&v[status_id][]=8` + version
+    filter) to list every issue *currently* sitting in Reopen.
+    One HTTP call, no per-issue scan, near-instant.
+  - **Phase B**: pull the full sprint list (all statuses),
+    subtract the Phase-A hits, and journal-scan only the
+    remainder for a historical status change into Reopen
+    (still by regex, so future renames won't break it).
+- 🩺 **Diagnostics**: every branch of the click handler now
+  logs to the browser console with a `[QA Assistant]` prefix —
+  wire-time confirmation, click detected, board scope, cache
+  hit, each Redmine `GET` URL, per-phase counts, journal-scan
+  progress, and any error. If the button ever appears silent
+  again, open DevTools → Console and the failure mode is
+  immediately visible.
+- ✅ **User-visible copy** ("Development: Reopen") is
+  unchanged; the id is used only for the fast Phase-A query.
+
+---
+
+## Version 6.5.2
+
+### Show Reopened Issues: drop the brittle pre-flight status lookup
+- 🐛 **Fixed the "Couldn't find the 'Development: Reopen'
+  status" toast reported after 6.5.1**, where the button refused to
+  scan at all on boards whose bulk_edit form (or column headers)
+  didn't surface the reopen status name in the shape the lookup
+  expected.
+- 🔎 **Root cause**: Redmine's `/issues/bulk_edit` status dropdown
+  is *workflow-gated* by the picked issue's tracker + the current
+  user's role — so the "Reopen" option only appears there when the
+  chosen ticket can legally transition to it. Boards where the
+  first available card was in a status that can't transition to
+  Reopen returned an empty option list from the fallback, and the
+  column-header lookup used `startsWith` which was too strict for
+  Agile plugin headers that prefix icons/toggles to the text.
+- 🧭 **Fix**: dropped the pre-flight status-id lookup entirely.
+  Since 6.5.1's journal-scanner already matches by *name*, the id
+  is unused — so we now go straight to the sprint-list + journal-
+  scan pass without any workflow-gated dropdown call. Matching
+  loosened to a regex `/reopen/i` against both the current status
+  column and the journal's new-status value, so "Development:
+  Reopen", plain "Reopen", "QA: Reopen", or any future variant
+  are all caught equally.
+- 📄 **Panel copy** still references "Development: Reopen" (button
+  title, modal lede) because that's the canonical name on the
+  CloudApper Redmines the extension targets; the regex is only used
+  for internal matching.
+
+---
+
+## Version 6.5.1
+
+### Show Reopened Issues: actually finds them now
+- 🐛 **Fixed the "No reopened issues on current board" false
+  negative reported after 6.5.0**, where boards with real
+  history of reopened-then-closed issues were reporting empty.
+- 🔎 **Root cause**: Redmine's issue query DSL has no "was ever
+  in status X" filter operator. The `op[status_id]=w` I used
+  turns out to be a *date* operator ("this week") in Redmine
+  core — applied to `status_id` it silently returns no rows.
+  No plugin-free URL filter equivalent exists.
+- 🧭 **New approach**: pull the full sprint issue list (all
+  statuses, `per_page=100`), then for every issue *not* currently
+  at *Development: Reopen* open its `/issues/N` HTML page and
+  scan `#history ul.details li` for a status change whose
+  new-value equals the target status name. Slower but reliable
+  across Redmine 4.x/5.x with no config or REST API dependency.
+- ⚡ **Bounded parallelism**: journal fetches run 5 at a time to
+  avoid throttling. The button label updates with progress
+  (`Scanning N of M…`) so the wait doesn't look hung. Results
+  are cached per-sprint until you navigate, same as before.
+- 📊 **Truncation notice**: if the sprint has more than 100
+  issues (Redmine's per-page cap on the HTML list endpoint), the
+  modal shows "Scanned first N of M sprint issues" so it's clear
+  the result set is bounded.
+- 📄 **Locale**: history scanner keys off the English word
+  "Status" as the property label — matches the rest of the
+  extension's English-only scope (README + package).
+
+---
+
+## Version 6.5.0
+
+### New: Show Reopened Issues button on Agile boards
+- 🔁 **Added a new *Reopened issues* section to the panel, revealed
+  only on Agile board pages, with a single **Show Reopened Issues**
+  button.** Clicking it lists every issue in the current sprint that
+  is either currently in *Development: Reopen* status or has ever
+  passed through that status at any point in its history — the
+  common "was this ticket reopened before?" question answered in one
+  click, without opening each issue's Journal tab.
+- 🎯 **Section placement**: in its own section directly below Bulk
+  Close, above the Agile Boards row, so the read-only "audit" action
+  sits next to the write action that changes statuses en masse.
+- 🧠 **How it works**: the button queries Redmine's HTML issue-list
+  endpoint with the `op[status_id]=w` ("was ever") filter operator
+  and the sprint's `fixed_version_id`, then parses the returned
+  `<tr>` rows. Same session-authenticated HTML approach as bulk
+  close (no `WWW-Authenticate: Basic` prompts), and the reopen
+  status id is discovered from the board's own column headers (or
+  the bulk_edit form as fallback) so no per-instance hardcoded id.
+- 📋 **View-only modal**: results open in a bulk-close-style
+  overlay listing each issue with its number (linking to
+  `/issues/N` in a new tab), subject, and current status. No
+  confirm button, just close. Toast "No reopened issues on current
+  board" if the query returns zero rows. Result set cached
+  per-sprint until you navigate, so repeat clicks are instant.
+
+---
+
+## Version 6.4.5
 
 ### Bulk close: the "Leave site?" prompt is actually gone this time
 - 🎯 **Fixed the "Leave site? Changes you made may not be saved."

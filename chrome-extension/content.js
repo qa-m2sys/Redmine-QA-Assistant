@@ -1017,6 +1017,319 @@ As a <role>, I want <goal> so that <benefit>.
     }
 
     //////////////////////////////////////////////////////
+    // Reopened issues discovery (Agile board)
+    //////////////////////////////////////////////////////
+
+    // The workflow status we're hunting for. We match by regex against
+    // the *rendered* status name (in the issue list + journal entries)
+    // rather than looking up a numeric id — Redmine's per-workflow
+    // status dropdown gates which options appear in the bulk_edit
+    // form based on the picked issue's tracker/role, so an id lookup
+    // there can (and did) fail even when the status exists. The
+    // pattern is lenient on purpose: any status containing "reopen"
+    // (case-insensitive) counts. Covers "Development: Reopen",
+    // "Reopen", "QA: Reopen", etc. equally well.
+    const REOPEN_STATUS_REGEX   = /reopen/i;
+    // User-facing name for panel copy — CloudApper Redmine instances
+    // this extension targets use "Development: Reopen" as the
+    // canonical reopen status, so the button title / modal lede
+    // still reference it directly.
+    const REOPEN_STATUS_DISPLAY = "Development: Reopen";
+    // Numeric status id for "Development: Reopen". Confirmed by the
+    // user to be `8` on every Redmine instance this extension
+    // targets. We use it as the primary key for the "currently
+    // reopened" query (one direct filter, no per-issue scan) and as
+    // a hint alongside the regex when scanning journals. This
+    // sidesteps the workflow-gated bulk_edit dropdown lookup that
+    // was unreliable in 6.5.1.
+    const REOPEN_STATUS_ID      = "8";
+
+    // Extract { projectSlug, versionId } from the current agile board URL.
+    // The pathname carries the project (`/projects/<slug>/agile/board/…`)
+    // and the query string carries `v[fixed_version_id][]=<id>` when the
+    // user opened the board for a specific sprint. Returns null when
+    // we're not on a board URL or the project slug can't be read.
+    function getCurrentBoardScope() {
+        const m = location.pathname.match(/^\/projects\/([^/]+)\/agile\/board/);
+        if (!m) return null;
+        const projectSlug = m[1];
+        // Redmine URL-encodes the filter params as v%5Bfixed_version_id%5D%5B%5D=…
+        // — URLSearchParams handles the decoding for us.
+        const q = new URLSearchParams(location.search);
+        let versionId = q.get("v[fixed_version_id][]");
+        // Some board URLs carry the version as `version_id=…` instead of
+        // the filter shape (older Agile plugin versions).
+        if (!versionId) versionId = q.get("version_id");
+        return { projectSlug: projectSlug, versionId: versionId || null };
+    }
+
+    // Ask Redmine for every issue in the current sprint that has ever
+    // been in the reopen status — including ones now closed or moved
+    // elsewhere.
+    //
+    // Two-phase strategy (as of 6.5.3):
+    //   Phase A — direct filter query with `status_id=<REOPEN_STATUS_ID>`
+    //             to grab everything CURRENTLY sitting in Reopen. One
+    //             HTTP call, no per-issue scan.
+    //   Phase B — pull the full sprint issue list (all statuses),
+    //             subtract the Phase-A hits, and journal-scan the
+    //             remainder for a historical status change to Reopen.
+    //             Journal scan uses BOTH the status regex and the
+    //             hardcoded status id — whichever matches wins.
+    //
+    // NOTE: Redmine's issue query DSL has no "was ever in status X"
+    // filter operator (the `w` op is *this-week* date, not "was").
+    // The Phase-B scan is the only reliable Redmine-4/5 plugin-free
+    // way to get historical status membership.
+    //
+    // We use the HTML endpoint (not /issues.json) for the same reason
+    // bulk-close switched off the JSON REST API in 6.4.2: on Redmine
+    // instances where the REST API is disabled or rejects
+    // session-cookie auth, JSON responses come back as 401 with
+    // WWW-Authenticate: Basic and pop the browser's credential dialog.
+    async function fetchReopenedIssues({ projectSlug, versionId, statusRegex, statusId, onProgress, prevPartial }) {
+        const pattern    = statusRegex || REOPEN_STATUS_REGEX;
+        const reopenId   = statusId    || REOPEN_STATUS_ID;
+        const basePath   = projectSlug ? ("/projects/" + encodeURIComponent(projectSlug) + "/issues") : "/issues";
+
+        console.info("[QA Assistant] fetchReopenedIssues start", { projectSlug, versionId, reopenId });
+
+        // Local helper — run one page of a Redmine issue list query
+        // and parse the resulting HTML into a plain array of issue
+        // metadata. `extraFilters` is a callback that mutates the
+        // URLSearchParams to add whatever status filter this phase
+        // needs.
+        async function queryIssuesPage(extraFilters, page) {
+            const params = new URLSearchParams();
+            params.append("set_filter", "1");
+            if (versionId) {
+                params.append("f[]", "fixed_version_id");
+                params.append("op[fixed_version_id]", "=");
+                params.append("v[fixed_version_id][]", versionId);
+            }
+            params.append("c[]", "tracker");
+            params.append("c[]", "status");
+            params.append("c[]", "subject");
+            params.append("c[]", "assigned_to");
+            params.append("per_page", "100");
+            if (page && page > 1) params.append("page", String(page));
+            extraFilters(params);
+            const url = basePath + "?" + params.toString();
+            console.info("[QA Assistant] GET", url);
+            const res = await fetch(url, {
+                credentials: "include",
+                headers: { "Accept": "text/html" }
+            });
+            if (!res.ok) throw new Error("Redmine query failed (HTTP " + res.status + ")");
+            const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+            const rows = [];
+            doc.querySelectorAll("tr[id^='issue-']").forEach(tr => {
+                const idMatch = tr.id.match(/^issue-(\d+)$/);
+                if (!idMatch) return;
+                const subject = (tr.querySelector("td.subject a") || tr.querySelector("td.subject") || {}).textContent || "";
+                const status  = (tr.querySelector("td.status") || {}).textContent || "";
+                const tracker = (tr.querySelector("td.tracker") || {}).textContent || "";
+                const assignee= (tr.querySelector("td.assigned_to") || {}).textContent || "";
+                rows.push({
+                    id: idMatch[1],
+                    subject: subject.trim(),
+                    status: status.trim(),
+                    tracker: tracker.trim(),
+                    assignee: assignee.trim()
+                });
+            });
+            // Total-in-query from pagination footer (for truncation reporting).
+            let total = rows.length;
+            const items = doc.querySelector(".pagination .items, span.pagination-info");
+            if (items) {
+                const tm = items.textContent.match(/\/\s*(\d+)/);
+                if (tm) total = parseInt(tm[1], 10);
+            }
+            return { rows: rows, total: total };
+        }
+
+        // Loop `queryIssuesPage` until we've pulled every row Redmine
+        // says exists for this filter. Redmine caps `per_page` at
+        // 100 on most instances, so a 347-issue sprint needs 4
+        // requests to be complete. Hard safety cap at 20 pages
+        // (=2000 issues) so a runaway pagination bug can't hammer
+        // the server.
+        async function queryAllIssues(extraFilters, label) {
+            const allRows = [];
+            let total = 0;
+            for (let page = 1; page <= 20; page++) {
+                const pageRes = await queryIssuesPage(extraFilters, page);
+                allRows.push.apply(allRows, pageRes.rows);
+                total = pageRes.total || allRows.length;
+                console.info("[QA Assistant]", label, "page", page, "→", pageRes.rows.length, "rows (running total", allRows.length, "/", total, ")");
+                if (pageRes.rows.length === 0) break;
+                if (allRows.length >= total) break;
+            }
+            return { rows: allRows, total: total };
+        }
+
+        // -----------------------------------------------------------------
+        // RESUME SUPPORT — when a previous scan of this same board scope
+        // hit the wall-clock cap, the click handler passes the cached
+        // partial result back in via `prevPartial`. We then skip Phase A
+        // (already known), reuse Phase B's issue list, and only journal-
+        // scan the candidates whose ids AREN'T in the prev-scanned set.
+        // Every click therefore chips away at the remaining sprint until
+        // it's fully scanned — no rescan, no wasted HTTP.
+        // -----------------------------------------------------------------
+        let currentlyReopened = [];
+        let phaseB;
+        let candidates;
+        const historyMatches = [];
+        const scannedIds = new Set();
+
+        if (prevPartial && prevPartial.timedOut && prevPartial.allCandidates && prevPartial.scannedIds) {
+            console.info("[QA Assistant] Resuming from partial cache —",
+                prevPartial.scannedIds.length, "already scanned,",
+                prevPartial.historyMatches.length, "hits carried forward");
+            currentlyReopened = prevPartial.currentlyReopened || [];
+            phaseB = { rows: prevPartial.allSprintRows || [], total: prevPartial.sprintTotalCount || 0 };
+            (prevPartial.historyMatches || []).forEach(h => historyMatches.push(h));
+            prevPartial.scannedIds.forEach(id => scannedIds.add(id));
+            candidates = prevPartial.allCandidates.filter(c => !scannedIds.has(c.id));
+        } else {
+            // Fresh scan — run both Redmine queries.
+            // Phase A — currently reopened (fast, direct).
+            try {
+                const phaseA = await queryAllIssues((params) => {
+                    params.append("f[]", "status_id");
+                    params.append("op[status_id]", "=");
+                    params.append("v[status_id][]", reopenId);
+                }, "Phase A");
+                currentlyReopened = phaseA.rows;
+                console.info("[QA Assistant] Phase A (currently reopened):", currentlyReopened.length);
+            } catch (e) {
+                console.warn("[QA Assistant] Phase A failed, continuing to Phase B:", e);
+            }
+
+            // Phase B — full sprint list (open + closed), any status.
+            phaseB = await queryAllIssues((params) => {
+                params.append("status_id", "*");
+            }, "Phase B");
+            console.info("[QA Assistant] Phase B (all sprint issues):", phaseB.rows.length, "/", phaseB.total);
+
+            // Subtract Phase-A hits so we don't re-scan them.
+            const knownIds = new Set(currentlyReopened.map(r => r.id));
+            candidates = phaseB.rows.filter(r => !knownIds.has(r.id));
+        }
+        console.info("[QA Assistant] Journal-scan candidates this pass:", candidates.length,
+            "(", scannedIds.size, "already scanned in previous passes )");
+
+        // Phase B history scan — bounded parallelism so we don't
+        // blast Redmine (some hosts throttle aggressively), and a
+        // wall-clock cap so the button never appears to hang. If
+        // the cap trips we return what we have so far — a partial
+        // result is better than a silent freeze; the next click
+        // will resume from where we stopped.
+        const CONCURRENCY  = 12;
+        const SCAN_TIMEOUT_MS = 180000; // 3 minutes
+        const scanStart    = performance.now();
+        let checked  = 0;
+        let timedOut = false;
+        if (onProgress) onProgress(checked, candidates.length);
+        for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+            if (performance.now() - scanStart > SCAN_TIMEOUT_MS) {
+                timedOut = true;
+                console.warn("[QA Assistant] Journal scan hit", SCAN_TIMEOUT_MS, "ms cap after", checked, "/", candidates.length, "this pass — returning partial result (next click resumes)");
+                break;
+            }
+            const batch = candidates.slice(i, i + CONCURRENCY);
+            const batchStart = performance.now();
+            const results = await Promise.all(batch.map(async (issue) => {
+                try {
+                    const res = await fetch("/issues/" + issue.id, {
+                        credentials: "include",
+                        headers: { "Accept": "text/html" }
+                    });
+                    if (!res.ok) return { issue: issue, match: false };
+                    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+                    return { issue: issue, match: issueHistoryHasStatus(doc, pattern) };
+                } catch (_) { return { issue: issue, match: false }; }
+            }));
+            results.forEach(r => {
+                scannedIds.add(r.issue.id);
+                if (r.match) historyMatches.push(r.issue);
+            });
+            checked += batch.length;
+            if (onProgress) onProgress(checked, candidates.length);
+            // Emit a batch log every ~5 batches so the console shows
+            // steady progress instead of a long silent gap.
+            if (i % (CONCURRENCY * 5) === 0 || checked === candidates.length) {
+                console.info("[QA Assistant] Journal scan", checked, "/", candidates.length,
+                    "(batch", Math.round(performance.now() - batchStart), "ms, hits so far", historyMatches.length, ")");
+            }
+        }
+        const scanDurationMs = Math.round(performance.now() - scanStart);
+        console.info("[QA Assistant] Historical matches:", historyMatches.length,
+            "(scan took", scanDurationMs, "ms, total scanned across passes:", scannedIds.size, ")");
+
+        // Sort by numeric id descending so newest reopened issues
+        // surface at the top of the modal.
+        const rows = currentlyReopened.concat(historyMatches).sort(
+            (a, b) => parseInt(b.id, 10) - parseInt(a.id, 10)
+        );
+        console.info("[QA Assistant] fetchReopenedIssues done: total rows =", rows.length);
+        // Build a resume snapshot alongside the display data. When the
+        // scan completes cleanly (`timedOut === false`) the caller can
+        // ignore the resume fields; when it times out the next click
+        // uses them via the `prevPartial` parameter.
+        const allCandidatesForResume = candidates.concat(
+            // Preserve the union: on a resume pass, `candidates` only
+            // held unscanned rows; we need to remember the FULL
+            // candidate list so a later resume can subtract again.
+            prevPartial && prevPartial.allCandidates
+                ? prevPartial.allCandidates.filter(c => scannedIds.has(c.id) && !candidates.some(x => x.id === c.id))
+                : []
+        );
+        return {
+            rows: rows,
+            totalCount: rows.length,
+            sprintTotalCount: phaseB.total,
+            scannedCount: scannedIds.size,
+            timedOut: timedOut,
+            // Resume snapshot (used when `timedOut` is true).
+            currentlyReopened: currentlyReopened,
+            allSprintRows: phaseB.rows,
+            allCandidates: allCandidatesForResume,
+            scannedIds: Array.from(scannedIds),
+            historyMatches: historyMatches
+        };
+    }
+
+    // True when the given issue-detail document's history journal
+    // contains a status change whose new-value text matches the
+    // supplied regex. English-locale only (README + package limit
+    // us to English Redmine, so no i18n needed).
+    function issueHistoryHasStatus(doc, pattern) {
+        const history = doc.querySelector("#history") || doc.querySelector("#issue-history");
+        if (!history) return false;
+        // Journal property changes: `<ul class="details"><li>
+        //   <strong>Status</strong> changed from
+        //   <i class="old-value">In Progress</i> to
+        //   <i class="new-value">Development: Reopen</i>
+        // </li>`. Any other property change ("Assignee", "Priority",
+        // etc.) shares this markup, so we filter on the <strong>
+        // label first.
+        const changeItems = history.querySelectorAll("ul.details li");
+        for (const li of changeItems) {
+            const strong = li.querySelector("strong");
+            if (!strong) continue;
+            if (strong.textContent.trim().toLowerCase() !== "status") continue;
+            const values = li.querySelectorAll("i");
+            if (!values.length) continue;
+            // Last <i> is the new value (Redmine renders old before new).
+            const newVal = values[values.length - 1].textContent.trim();
+            if (pattern.test(newVal)) return true;
+        }
+        return false;
+    }
+
+    //////////////////////////////////////////////////////
     // Navigation
     //////////////////////////////////////////////////////
 
@@ -1303,6 +1616,44 @@ As a <role>, I want <goal> so that <benefit>.
                     </div>
                 </div>` : "";
 
+        // "Show Reopened Issues" section — lives directly below Bulk
+        // Close, only revealed on Agile board pages. Button trips a
+        // one-shot HTML query for issues that ever had the reopen
+        // status in the current sprint, then hands the result to the
+        // view-only reopened-issues modal below.
+        const reopenedIssuesHtml = onRedmine ? `
+                <div class="qa-reopened-wrap" id="qa-reopened-wrap" hidden>
+                    <div class="qa-divider"></div>
+                    <div class="qa-section-label">Reopened issues</div>
+                    <div class="qa-reopened-row">
+                        <button class="qa-btn qa-tmpl-btn qa-action" data-action="show-reopened" id="qa-show-reopened" type="button" title="List issues in the current sprint that ever had the '${REOPEN_STATUS_DISPLAY}' status"><span class="qa-btn-icon">${svgIcon("rotate-ccw")}</span><span class="qa-btn-label" id="qa-show-reopened-label">Get Reopened Issues</span></button>
+                    </div>
+                    <div class="qa-reopened-warn" id="qa-reopened-warn" role="status" hidden>Partially synced. Please sync again to get remaining issues.</div>
+                </div>` : "";
+
+        // View-only modal that displays the reopened-issues result set.
+        // Same overlay chrome as the bulk-close modal (theme, close X,
+        // list styling) but no confirm button, no note, no version —
+        // rows are links out to each issue's detail page.
+        const reopenedModalHtml = onRedmine ? `
+                <div class="qa-modal-overlay" id="qa-reopened-modal" hidden role="dialog" aria-modal="true" aria-labelledby="qa-reopened-modal-title">
+                    <div class="qa-modal">
+                        <div class="qa-modal-header">
+                            <span class="qa-modal-title" id="qa-reopened-modal-title">Reopened issues<span class="qa-modal-count-badge" id="qa-reopened-modal-count" hidden></span></span>
+                            <button class="qa-hbtn qa-modal-close" data-action="reopened-close" type="button" title="Close">${svgIcon("x")}</button>
+                        </div>
+                        <div class="qa-modal-body">
+                            <p class="qa-modal-lede" id="qa-reopened-modal-lede">These issues have passed through the <strong>${REOPEN_STATUS_DISPLAY}</strong> status at least once.</p>
+                            <ul class="qa-modal-list qa-modal-list-reopened" id="qa-reopened-modal-list"></ul>
+                            <div class="qa-modal-summary" id="qa-reopened-modal-summary" hidden></div>
+                        </div>
+                        <div class="qa-modal-actions">
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="reopened-copy" id="qa-reopened-copy" type="button" title="Copy the list (id + subject with hyperlinks) to the clipboard"><span class="qa-btn-icon">${svgIcon("copy")}</span><span class="qa-btn-label" id="qa-reopened-copy-label">Copy list</span></button>
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="reopened-close" type="button"><span class="qa-btn-label">Close</span></button>
+                        </div>
+                    </div>
+                </div>` : "";
+
         panel.innerHTML = `
             <div class="qa-header" id="qa-header">
                 <span class="qa-title"><span class="qa-title-icon" id="qa-title-icon">${svgIcon("rocket")}</span>QA Assistant</span>
@@ -1333,6 +1684,7 @@ As a <role>, I want <goal> so that <benefit>.
                 ${templateHtml}
                 ${closeIssueHtml}
                 ${bulkCloseHtml}
+                ${reopenedIssuesHtml}
                 <div class="qa-divider"></div>
                 <div class="qa-section-label">Agile Boards</div>
                 <div class="qa-boards-row" id="qa-boards-wrap">
@@ -1341,6 +1693,7 @@ As a <role>, I want <goal> so that <benefit>.
                 <div class="qa-version">${QA_VERSION ? "v" + QA_VERSION : ""}</div>
             </div>
             ${bulkModalHtml}
+            ${reopenedModalHtml}
         `;
 
         document.body.appendChild(panel);
@@ -2267,10 +2620,277 @@ As a <role>, I want <goal> so that <benefit>.
                 }
             }
 
+            // ---- Show Reopened Issues (Agile board) ----
+            // View-only companion to bulk-close: one button that fires an
+            // HTML query for every issue in the sprint that ever held the
+            // "Development: Reopen" status. Wired in the same guarded
+            // block so it only runs on Redmine origins.
+            const reopenedWrap      = panel.querySelector("#qa-reopened-wrap");
+            const reopenedBtn       = panel.querySelector("#qa-show-reopened");
+            const reopenedBtnLabel  = panel.querySelector("#qa-show-reopened-label");
+            const reopenedWarn      = panel.querySelector("#qa-reopened-warn");
+            const reopenedModal     = panel.querySelector("#qa-reopened-modal");
+            const reopenedModalList = reopenedModal && reopenedModal.querySelector("#qa-reopened-modal-list");
+            const reopenedModalSum  = reopenedModal && reopenedModal.querySelector("#qa-reopened-modal-summary");
+            const reopenedModalCount = reopenedModal && reopenedModal.querySelector("#qa-reopened-modal-count");
+
+            // Same overflow / backdrop-filter trick as the bulk modal —
+            // detach from panel so it can cover the whole viewport.
+            if (reopenedModal) document.body.appendChild(reopenedModal);
+
+            // Per-board short-lived cache so re-clicking the button while
+            // sitting on the same sprint doesn't hammer the /issues
+            // endpoint. Cleared on navigation (hashchange / popstate)
+            // because moving between boards changes the scope.
+            const reopenedCache = new Map();
+            function reopenedCacheKey(scope) {
+                return (scope && scope.projectSlug || "") + "|" + (scope && scope.versionId || "");
+            }
+            window.addEventListener("popstate",   () => reopenedCache.clear());
+            window.addEventListener("hashchange", () => reopenedCache.clear());
+
+            // Toggle the "Partially synced" warning strip below the
+            // button based on the latest scan result. Called after
+            // every scan outcome (fresh scan, resume, cache-hit
+            // complete) so the strip always reflects reality.
+            function updateReopenedWarn(result) {
+                if (!reopenedWarn) return;
+                reopenedWarn.hidden = !(result && result.timedOut);
+            }
+
+            function closeReopenedModal() {
+                if (!reopenedModal) return;
+                // Mirror bulk-close teardown: strip the open class first
+                // so the fade-out transition plays, then hide after the
+                // 180ms opacity transition finishes.
+                reopenedModal.classList.remove("qa-modal-open");
+                setTimeout(() => { reopenedModal.hidden = true; }, 180);
+            }
+
+            // Latest rows currently shown in the modal. Captured on
+            // every `openReopenedModal` call so the "Copy list" button
+            // has something to serialize even after re-scans.
+            let reopenedCurrentRows = [];
+
+            // Build the HTML + plain-text payloads for the Copy button.
+            // HTML preserves the `#id` hyperlink when pasted into rich
+            // targets (Word, Outlook, Redmine wiki editors); the plain
+            // fallback lists the URL in parentheses so Notepad-style
+            // targets still get something usable.
+            function buildReopenedClipboardPayload(rows) {
+                const htmlLines = [];
+                const textLines = [];
+                rows.forEach(r => {
+                    const url = REDMINE + "/issues/" + r.id;
+                    const subj = (r.subject || "(no subject)")
+                        .replace(/&/g, "&amp;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;");
+                    htmlLines.push('<a href="' + url + '">#' + r.id + '</a> - ' + subj);
+                    textLines.push("#" + r.id + " - " + (r.subject || "(no subject)") + " (" + url + ")");
+                });
+                return {
+                    html: htmlLines.join("<br>"),
+                    text: textLines.join("\n")
+                };
+            }
+
+            async function copyReopenedListToClipboard() {
+                const rows = reopenedCurrentRows;
+                if (!rows.length) { toast("Nothing to copy"); return; }
+                const payload = buildReopenedClipboardPayload(rows);
+                try {
+                    // Rich HTML + plain text via ClipboardItem so both
+                    // rich and plain paste targets pick their preferred
+                    // format. Falls back to plain-text writeText() if
+                    // ClipboardItem isn't supported (older browsers).
+                    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+                        const item = new ClipboardItem({
+                            "text/html":  new Blob([payload.html], { type: "text/html" }),
+                            "text/plain": new Blob([payload.text], { type: "text/plain" })
+                        });
+                        await navigator.clipboard.write([item]);
+                    } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(payload.text);
+                    } else {
+                        throw new Error("Clipboard API unavailable");
+                    }
+                    console.info("[QA Assistant] Copied", rows.length, "reopened issues to clipboard");
+                    toast("Copied " + rows.length + " issue" + (rows.length === 1 ? "" : "s"));
+                } catch (err) {
+                    console.error("[QA Assistant] Copy failed:", err);
+                    toast("Copy failed: " + (err && err.message ? err.message : "unknown error"));
+                }
+            }
+
+            function openReopenedModal(rows, result) {
+                if (!reopenedModal || !reopenedModalList) return;
+                console.info("[QA Assistant] openReopenedModal rows =", rows.length);
+                reopenedCurrentRows = rows;
+                // Mirror panel theme + accent classes onto the detached
+                // modal so it picks up the same tokens (identical to the
+                // bulk-close modal — CSS custom props on the panel don't
+                // cascade to <body>-mounted overlays).
+                reopenedModal.className = "qa-modal-overlay";
+                if (panel.classList.contains("qa-dark")) reopenedModal.classList.add("qa-dark");
+                Array.from(panel.classList).forEach(c => {
+                    if (c.indexOf("qa-accent-") === 0) reopenedModal.classList.add(c);
+                });
+                reopenedModalList.innerHTML = "";
+                // Total-reopened counter pill in the title. Uses
+                // rows.length because that's exactly what the modal
+                // is about to display (Phase A + Phase B combined).
+                if (reopenedModalCount) {
+                    reopenedModalCount.textContent = String(rows.length);
+                    reopenedModalCount.hidden = rows.length === 0;
+                }
+                rows.forEach(r => {
+                    const li = document.createElement("li");
+                    li.setAttribute("data-issue-id", r.id);
+                    const a  = document.createElement("a");
+                    a.href   = "/issues/" + r.id;
+                    a.target = "_blank";
+                    a.rel    = "noopener";
+                    a.textContent = "#" + r.id;
+                    const sub = document.createElement("span");
+                    sub.className = "qa-modal-list-subject";
+                    sub.textContent = r.subject || "(no subject)";
+                    const badge = document.createElement("span");
+                    badge.className = "qa-modal-badge qa-modal-badge-noop";
+                    badge.textContent = r.status || "";
+                    li.appendChild(a);
+                    li.appendChild(document.createTextNode(" "));
+                    li.appendChild(sub);
+                    if (r.status) {
+                        li.appendChild(document.createTextNode(" "));
+                        li.appendChild(badge);
+                    }
+                    reopenedModalList.appendChild(li);
+                });
+                if (reopenedModalSum) {
+                    // Flag truncation: either the journal scan hit its
+                    // wall-clock cap (timedOut) or Redmine's pagination
+                    // totals disagree with what we scanned. On timeout
+                    // we tell the user to click again — the next click
+                    // resumes from the cached checkpoint.
+                    const scanned = (result && result.scannedCount) || rows.length;
+                    const sprintTotal = (result && result.sprintTotalCount) || scanned;
+                    if (result && result.timedOut) {
+                        reopenedModalSum.hidden = false;
+                        reopenedModalSum.textContent = "Partial result: scanned " + scanned + " of " + sprintTotal + " sprint issues so far. Close and click the button again to resume where this pass left off.";
+                    } else if (sprintTotal > scanned) {
+                        reopenedModalSum.hidden = false;
+                        reopenedModalSum.textContent = "Scanned first " + scanned + " of " + sprintTotal + " sprint issues.";
+                    } else {
+                        reopenedModalSum.hidden = true;
+                        reopenedModalSum.textContent = "";
+                    }
+                }
+                // Reveal + fade in. `hidden=false` first (so the browser
+                // lays it out) then rAF-add `qa-modal-open` on the next
+                // frame so the opacity transition actually animates
+                // from 0→1 instead of snapping.
+                reopenedModal.hidden = false;
+                requestAnimationFrame(() => reopenedModal.classList.add("qa-modal-open"));
+            }
+
+            if (reopenedModal) {
+                // Backdrop click + explicit close buttons both dismiss.
+                reopenedModal.addEventListener("click", (e) => {
+                    if (e.target === reopenedModal) closeReopenedModal();
+                });
+                reopenedModal.querySelectorAll('[data-action="reopened-close"]').forEach(b =>
+                    b.addEventListener("click", (e) => { e.stopPropagation(); closeReopenedModal(); }));
+                const copyBtn = reopenedModal.querySelector('[data-action="reopened-copy"]');
+                if (copyBtn) copyBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    copyReopenedListToClipboard();
+                });
+            }
+
+            if (reopenedBtn) {
+                console.info("[QA Assistant] Reopened button wired");
+                reopenedBtn.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    console.info("[QA Assistant] Reopened button clicked");
+                    const scope = getCurrentBoardScope();
+                    console.info("[QA Assistant] Board scope:", scope);
+                    if (!scope) {
+                        toast("Open an Agile board first.");
+                        return;
+                    }
+                    const cacheKey = reopenedCacheKey(scope);
+                    const cached   = reopenedCache.get(cacheKey);
+                    // A cached result short-circuits ONLY when the scan
+                    // completed cleanly. Partial (timed-out) results
+                    // are used as a resume anchor via `prevPartial` on
+                    // the next call — we fall through to the fetch.
+                    if (cached && !cached.timedOut) {
+                        console.info("[QA Assistant] Cache hit (complete) for", cacheKey, "rows =", cached.rows.length);
+                        updateReopenedWarn(cached);
+                        if (cached.rows.length) openReopenedModal(cached.rows, cached);
+                        else toast("No reopened issues on current board");
+                        return;
+                    }
+                    if (cached && cached.timedOut) {
+                        console.info("[QA Assistant] Cache hit (partial) — resuming scan from",
+                            (cached.scannedIds || []).length, "/", (cached.allCandidates || []).length);
+                    }
+                    // Loading UI — disable the button, add the spinning-
+                    // icon `qa-loading` class, and swap the label until
+                    // we have a result to show. All restored in `finally`.
+                    const originalLabel = reopenedBtnLabel ? reopenedBtnLabel.textContent : "";
+                    reopenedBtn.disabled = true;
+                    reopenedBtn.classList.add("qa-loading");
+                    if (reopenedBtnLabel) reopenedBtnLabel.textContent = cached && cached.timedOut ? "Resuming…" : "Loading…";
+                    try {
+                        // Direct filter for currently-at-status-8 (Phase A)
+                        // + journal scan for historical hits (Phase B).
+                        // No pre-flight bulk_edit lookup — Redmine's
+                        // workflow-gated dropdown made that unreliable.
+                        // When `cached` exists and is a timed-out
+                        // partial, pass it as `prevPartial` so the
+                        // scan picks up from the last checkpoint.
+                        const result = await fetchReopenedIssues({
+                            projectSlug: scope.projectSlug,
+                            versionId: scope.versionId,
+                            statusRegex: REOPEN_STATUS_REGEX,
+                            statusId: REOPEN_STATUS_ID,
+                            prevPartial: (cached && cached.timedOut) ? cached : null,
+                            onProgress: (done, total) => {
+                                if (!reopenedBtnLabel) return;
+                                if (total > 0) {
+                                    reopenedBtnLabel.textContent = "Scanning " + done + " of " + total + "…";
+                                } else {
+                                    reopenedBtnLabel.textContent = "Loading…";
+                                }
+                            }
+                        });
+                        reopenedCache.set(cacheKey, result);
+                        updateReopenedWarn(result);
+                        if (!result.rows.length) {
+                            toast("No reopened issues on current board");
+                        } else {
+                            openReopenedModal(result.rows, result);
+                        }
+                    } catch (err) {
+                        console.error("[QA Assistant] Reopened issues failed:", err);
+                        toast("Couldn't load reopened issues: " + (err && err.message ? err.message : "unknown error"));
+                    } finally {
+                        reopenedBtn.disabled = false;
+                        reopenedBtn.classList.remove("qa-loading");
+                        if (reopenedBtnLabel) reopenedBtnLabel.textContent = originalLabel || "Get Reopened Issues";
+                    }
+                });
+            } else {
+                console.warn("[QA Assistant] Reopened button not found (#qa-show-reopened)");
+            }
+
             // Only reveal on Agile board pages — everywhere else the section
             // makes no sense (no cards to select).
             if (isAgileBoardPage()) {
                 bulkWrap.hidden = false;
+                if (reopenedWrap) reopenedWrap.hidden = false;
             }
         }
 
