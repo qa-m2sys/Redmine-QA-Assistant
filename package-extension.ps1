@@ -27,6 +27,8 @@ $slug    = ($meta.name -replace '[^A-Za-z0-9]+', '-').Trim('-').ToLower()
 # generate-icons.ps1 and any non-generated source images in icons/).
 $include = @(
     'manifest.json',
+    'background.js',
+    'beforeunload-guard.js',
     'content.js',
     'content.css',
     'icons/icon16.png',

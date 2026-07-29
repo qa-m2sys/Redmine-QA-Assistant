@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      6.4.1
+// @version      6.4.5
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -10,11 +10,77 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @connect      api.openai.com
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
 
     'use strict';
+
+    //////////////////////////////////////////////////////
+    // beforeunload guard — installed at document_start so it can
+    // intercept every beforeunload listener that Redmine core, the
+    // Agile plugin, and jQuery's warn_leaving_unsaved bind on window
+    // later. qaSafeReload() removes all of them before firing
+    // location.reload(), so the browser doesn't pop a "Leave site?
+    // Changes you made may not be saved" prompt when the bulk-close
+    // modal auto-refreshes the board. Trying to defuse the event from
+    // a later listener doesn't work: once a handler cancels the
+    // BeforeUnloadEvent (returnValue non-empty OR preventDefault())
+    // there is no way to un-cancel it from a subsequent listener.
+    //////////////////////////////////////////////////////
+    const __qaBufRegistry = new Set();
+    let   __qaOnbufValue  = null;
+    const __qaBufNativeDesc = Object.getOwnPropertyDescriptor(Window.prototype, "onbeforeunload");
+    (function installBeforeUnloadGuard() {
+        if (window.__qaBeforeUnloadGuardInstalled) return;
+        window.__qaBeforeUnloadGuardInstalled = true;
+        const origAdd    = EventTarget.prototype.addEventListener;
+        const origRemove = EventTarget.prototype.removeEventListener;
+        EventTarget.prototype.addEventListener = function (type, listener, opts) {
+            if (this === window && type === "beforeunload" && typeof listener === "function") {
+                __qaBufRegistry.add({ listener: listener, opts: opts });
+            }
+            return origAdd.apply(this, arguments);
+        };
+        EventTarget.prototype.removeEventListener = function (type, listener, opts) {
+            if (this === window && type === "beforeunload" && typeof listener === "function") {
+                for (const entry of __qaBufRegistry) {
+                    if (entry.listener === listener) __qaBufRegistry.delete(entry);
+                }
+            }
+            return origRemove.apply(this, arguments);
+        };
+        try {
+            Object.defineProperty(window, "onbeforeunload", {
+                configurable: true,
+                get() { return __qaOnbufValue; },
+                set(v) {
+                    __qaOnbufValue = v;
+                    if (__qaBufNativeDesc && __qaBufNativeDesc.set) {
+                        try { __qaBufNativeDesc.set.call(window, v); } catch (_) {}
+                    }
+                }
+            });
+        } catch (_) { /* older browsers may refuse — no-op fallback */ }
+    })();
+
+    function qaSafeReload() {
+        const origRemove = EventTarget.prototype.removeEventListener;
+        for (const entry of __qaBufRegistry) {
+            try { origRemove.call(window, "beforeunload", entry.listener, entry.opts); } catch (_) {}
+        }
+        __qaBufRegistry.clear();
+        try {
+            __qaOnbufValue = null;
+            if (__qaBufNativeDesc && __qaBufNativeDesc.set) __qaBufNativeDesc.set.call(window, null);
+        } catch (_) {}
+        try {
+            const jq = window.jQuery || window.$;
+            if (jq) jq(window).off("beforeunload");
+        } catch (_) {}
+        location.reload();
+    }
 
     //////////////////////////////////////////////////////
     // CONFIG
@@ -952,42 +1018,80 @@ As a <role>, I want <goal> so that <benefit>.
         return true;
     }
 
-    // Update a single issue via Redmine's JSON API. Preferred over
-    // postBulkUpdate for progress reporting because it returns real
-    // per-issue success/failure with structured error messages on 422
-    // (validation), 401/403 (permission), etc. — the bulk endpoint
-    // silently redirects with 302 even when some rows were dropped.
+    // Update a single issue during bulk close. Historical note: this used
+    // to hit Redmine's JSON REST API (PUT /issues/N.json) because its
+    // 422 responses have nice per-field error arrays. That endpoint
+    // responds to an unauthenticated request with
+    //   HTTP/1.1 401
+    //   WWW-Authenticate: Basic realm="Redmine API"
+    // which makes Chrome's fetch stack pop the browser's Basic Auth
+    // dialog — once per issue — during a bulk close, even when the
+    // user already has a valid Redmine session cookie. Some Redmine
+    // instances gate the JSON API behind "Enable REST web service" and
+    // reject session-only auth, and the browser prompt fires before we
+    // ever see the response.
+    //
+    // The fix is to post to the HTML form endpoint that Redmine's own
+    // edit form uses. It's session-authenticated (cookie + CSRF token),
+    // has no basic-auth challenge, and never triggers a credential
+    // prompt. On success Redmine 302s to /issues/N; on validation
+    // failure it re-renders the edit form with an #errorExplanation
+    // block, which we scrape to surface per-issue errors.
     async function postSingleIssueUpdate({ id, statusId, versionId, notes, csrf }) {
-        const body = { issue: { status_id: statusId } };
-        if (notes) body.issue.notes = notes;
+        const params = new URLSearchParams();
+        params.append("authenticity_token", csrf);
+        params.append("_method", "put");
+        params.append("issue[status_id]", String(statusId));
+        if (notes) params.append("issue[notes]", notes);
         if (versionId) {
-            body.issue.custom_field_values = {};
-            body.issue.custom_field_values[CLOSED_VERSION_CF_ID] = versionId;
+            params.append("issue[custom_field_values][" + CLOSED_VERSION_CF_ID + "]", String(versionId));
         }
-        const res = await fetch("/issues/" + encodeURIComponent(id) + ".json", {
-            method: "PUT",
+        const res = await fetch("/issues/" + encodeURIComponent(id), {
+            method: "POST",
             credentials: "include",
+            redirect: "follow",
             headers: {
-                "Content-Type": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
                 "X-CSRF-Token": csrf,
-                "Accept": "application/json"
+                "Accept": "text/html"
             },
-            body: JSON.stringify(body)
+            body: params.toString()
         });
-        if (res.ok) return true;
-        // Try to surface Redmine's own error message (422 returns
-        // { errors: ["..."] }; auth failures often return HTML or a plain
-        // {error: "..."} — fall back to the HTTP status if we can't parse).
-        let msg = "HTTP " + res.status;
-        try {
-            const data = await res.json();
-            if (data && Array.isArray(data.errors) && data.errors.length) {
-                msg = data.errors.join("; ");
-            } else if (data && data.error) {
-                msg = String(data.error);
+        if (res.status >= 500) throw new Error("HTTP " + res.status);
+        // Redmine's before_action redirects to /login when the session
+        // has expired — fetch follows the 302 and res.url is /login?...
+        if (res.redirected && /\/login(?:\?|$)/.test(res.url || "")) {
+            throw new Error("Session expired — reload Redmine and sign in again");
+        }
+        // Any other redirect is Redmine's success path (302 to the
+        // issue's own page). If fetch didn't follow a redirect but the
+        // status is still 2xx, Redmine re-rendered the edit form because
+        // validation failed — scrape the errors.
+        if (res.redirected) return true;
+        if (res.status === 401 || res.status === 403) {
+            throw new Error("Not permitted to close this issue");
+        }
+        if (res.ok) {
+            let text = "";
+            try { text = await res.text(); } catch (_) {}
+            const explain = text.match(/<div[^>]+id=["']errorExplanation["'][^>]*>([\s\S]*?)<\/div>/i);
+            if (explain) {
+                const items = Array.from(explain[1].matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi))
+                    .map(m => m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+                    .filter(Boolean);
+                if (items.length) throw new Error(items.join("; "));
             }
-        } catch (_) { /* body wasn't JSON */ }
-        throw new Error(msg);
+            const flash = text.match(/<div[^>]+id=["']flash_error["'][^>]*>([\s\S]*?)<\/div>/i);
+            if (flash) {
+                const msg = flash[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+                if (msg) throw new Error(msg);
+            }
+            // Redmine re-rendered a page without redirecting and we
+            // couldn't find explicit error markup — don't silently
+            // report the row as closed.
+            throw new Error("Update didn't take (no redirect)");
+        }
+        throw new Error("HTTP " + res.status);
     }
 
     //////////////////////////////////////////////////////
@@ -1734,10 +1838,14 @@ As a <role>, I want <goal> so that <benefit>.
             let bulkWillCloseIds = [];       // Ids the POST will actually send
             // Flipped to true once the confirm-click loop has finished. When
             // set, any dismissal of the modal (Close button, backdrop, X)
-            // triggers a page reload so the board reflects the new state —
-            // and closeBulkModal() strips beforeunload guards first so the
-            // browser doesn't prompt.
+            // removes the closed cards from the Agile board and hides the
+            // modal without navigating — a reload here would fire Redmine's
+            // warnLeavingUnsaved beforeunload prompt.
             let bulkOperationDone = false;
+            // Ids that postSingleIssueUpdate returned success for. Used by
+            // closeBulkModal() to strip those cards from the Agile board
+            // DOM so the visible state matches reality without a reload.
+            let bulkClosedIds = new Set();
 
             // Ids to POST are computed at modal-open time (excludes cards that
             // are already Closed and cards whose current status has no direct
@@ -1974,6 +2082,7 @@ As a <role>, I want <goal> so that <benefit>.
                 if (bulkModalProgressFill) bulkModalProgressFill.style.width = "0%";
                 if (bulkModalProgressText) bulkModalProgressText.textContent = "Closing…";
                 bulkOperationDone = false;
+                bulkClosedIds.clear();
                 if (bulkModalSummary) {
                     bulkModalSummary.hidden = false;
                     bulkModalSummary.className = "qa-modal-summary qa-modal-summary-checking";
@@ -2066,30 +2175,34 @@ As a <role>, I want <goal> so that <benefit>.
 
             function closeBulkModal() {
                 if (!bulkModal) return;
-                // If the close operation ran (in full or in part), we need to
-                // refresh the board so closed cards actually disappear.
-                // Strip beforeunload guards first — Redmine's
-                // warnLeavingUnsaved and the Agile plugin's ajaxComplete
-                // hooks can leave a `beforeunload` handler installed that
-                // would otherwise show a "Leave site?" prompt.
+                // Update the visible board first so that even if the
+                // reload below hits a browser prompt the user can't
+                // suppress, dismissing that prompt still leaves the board
+                // in a correct state (closed cards already gone, select
+                // mode already exited).
                 if (bulkOperationDone) {
-                    try { if (bulkNote) bulkNote.value = ""; } catch (_) {}
-                    try { window.onbeforeunload = null; } catch (_) {}
-                    try {
-                        const jq = window.jQuery || window.$;
-                        if (jq) jq(window).off("beforeunload");
-                    } catch (_) {}
-                    // Capture-phase safety net: fires before any handler
-                    // Redmine may have re-added and cancels the prompt.
-                    window.addEventListener("beforeunload", (ev) => {
-                        ev.stopImmediatePropagation();
-                        delete ev.returnValue;
-                    }, { capture: true, once: true });
-                    location.reload();
-                    return;
+                    bulkClosedIds.forEach(id => {
+                        const ctx = bulkCardCtx.get(id);
+                        const card = ctx && ctx.card;
+                        if (card && card.parentNode) {
+                            card.parentNode.removeChild(card);
+                        }
+                    });
+                    exitBulkSelect();
                 }
                 bulkModal.classList.remove("qa-modal-open");
-                setTimeout(() => { bulkModal.hidden = true; }, 180);
+                setTimeout(() => {
+                    bulkModal.hidden = true;
+                    if (!bulkOperationDone) return;
+                    // Reload the Agile board so column counters, sprint
+                    // totals, and any server-side derived widgets refresh
+                    // — the DOM removal above only fixes the cards. The
+                    // qaSafeReload() helper detaches every beforeunload
+                    // listener our document-start guard collected before
+                    // firing location.reload(), so the browser doesn't
+                    // pop a "Leave site?" prompt.
+                    qaSafeReload();
+                }, 180);
             }
 
             bulkSubmitBtn.addEventListener("click", (e) => {
@@ -2157,6 +2270,7 @@ As a <role>, I want <goal> so that <benefit>.
                                     notes,
                                     csrf
                                 });
+                                bulkClosedIds.add(id);
                                 // Mark the row as closed with a green badge.
                                 const li = bulkModalList.querySelector('li[data-issue-id="' + id + '"]');
                                 if (li) {
@@ -2205,19 +2319,11 @@ As a <role>, I want <goal> so that <benefit>.
                                 ? "Closed " + okCount + " of " + ids.length + " (" + failed + " failed)"
                                 : "Closed " + okCount + " issue" + (okCount === 1 ? "" : "s")
                         );
-                        // Defuse Redmine's warnLeavingUnsaved guard NOW so
-                        // the user can navigate away / close the tab without
-                        // hitting a browser prompt while reviewing results.
-                        try { if (bulkNote) bulkNote.value = ""; } catch (_) {}
-                        try { window.onbeforeunload = null; } catch (_) {}
-                        try {
-                            const jq = window.jQuery || window.$;
-                            if (jq) jq(window).off("beforeunload");
-                        } catch (_) {}
                         // Repurpose the confirm button as a "Close window"
                         // trigger and re-enable the cancel controls — the
                         // user reviews the per-row statuses, then dismisses
-                        // (which reloads the board via closeBulkModal).
+                        // (which removes the closed cards from the board
+                        // without reloading).
                         bulkOperationDone = true;
                         if (bulkModalOkLbl) bulkModalOkLbl.textContent = "Close window";
                         bulkModalOkBtn.disabled = false;

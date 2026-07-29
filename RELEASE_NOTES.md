@@ -5,7 +5,120 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.4.1 — current
+## Version 6.4.5 — current
+
+### Bulk close: the "Leave site?" prompt is actually gone this time
+- 🎯 **Fixed the "Leave site? Changes you made may not be saved."
+  prompt that still appeared after 6.4.4's fix.** The 6.4.4 defuser
+  strategy (let Redmine's `warn_leaving_unsaved` handler run, then
+  reset `event.returnValue` in a later listener) only works when the
+  cancelling handler *sets* `returnValue` — it can't undo a
+  `preventDefault()` call, and it turned out at least one script on
+  the Redmine instance was cancelling the event that way.
+- 🛡️ **New approach: a main-world guard installed at `document_start`
+  that intercepts every beforeunload registration on `window`.** By
+  wrapping `EventTarget.prototype.addEventListener` and the
+  `window.onbeforeunload` property setter *before* Redmine's own JS
+  loads, the guard captures every listener that anyone binds —
+  Redmine core, the Agile plugin, jQuery's `warn_leaving_unsaved`,
+  everyone. Before firing `location.reload()`, `qaSafeReload()`
+  detaches all of them via the original native `removeEventListener`,
+  so no cancelling handler is left to fire and the browser reloads
+  silently.
+- 📦 **Chrome extension**: new `beforeunload-guard.js` runs in the
+  page's main world at `document_start` (via a new `content_scripts`
+  entry with `"world": "MAIN"`). content.js triggers it by
+  dispatching a `qa-safe-reload` CustomEvent on window, which crosses
+  the isolated ↔ main world boundary.
+- 📜 **Userscript**: added `@run-at document-start` and inlined the
+  guard at the top of the IIFE. Reload the userscript from your
+  userscript manager after updating so the new run-at kicks in.
+- 📦 **Packaging**: `package-extension.ps1` now includes the new
+  guard file (and `background.js`, which had been silently missing
+  from the ZIP artifact — the AI features wouldn't have worked at
+  all on installs from the packaged ZIP).
+
+---
+
+## Version 6.4.4
+
+### Bulk close: auto-refresh the board after dismissing the modal
+- 🔄 **The Agile board now reloads automatically after you dismiss
+  the confirmation modal** (Cancel, X, or Close window). 6.4.3 only
+  removed the closed cards from the DOM, which handled visible
+  correctness but left column counters, sprint totals, and other
+  Redmine-derived widgets stale until you refreshed manually.
+- 🗑️ **The "Leave site?" prompt still doesn't appear.** New approach:
+  instead of trying (and failing) to strip Redmine's beforeunload
+  handler ahead of time, we let it run and *defuse* the event
+  afterwards. `warn_leaving_unsaved.js` sets `event.returnValue` to a
+  warning string but never calls `preventDefault()`, and the browser
+  only prompts when `returnValue` is non-empty at the end of dispatch.
+  So we register a defuser listener — which runs last, because window
+  listeners fire in registration order — that resets `returnValue` back
+  to `""`. Combined with the existing `.onbeforeunload = null` and
+  jQuery `.off("beforeunload")` calls, that's enough to reach
+  `location.reload()` without the browser interrupting.
+- 🛡️ **Safety net:** cards and select mode are cleared *before* the
+  reload fires. So on the off chance a future Redmine plugin binds a
+  beforeunload handler that does call `preventDefault()`, dismissing
+  the resulting prompt still leaves the board in a correct state.
+
+---
+
+## Version 6.4.3
+
+### Bulk close: dismissing the modal no longer shows "Leave site?"
+- 🗑️ **Fixed the browser "Leave site? Changes you made may not be
+  saved" prompt that appeared when clicking Cancel or Close window on
+  the bulk-close confirmation modal.** After a successful close batch,
+  `closeBulkModal()` used to call `location.reload()` so the Agile
+  board would repaint without the closed cards. That reload fires
+  Redmine's `warnLeavingUnsaved` beforeunload handler (plus the Agile
+  plugin's ajaxComplete-installed guard). 6.3.x tried to defuse those
+  handlers with a capture-phase `stopImmediatePropagation()` and
+  `delete event.returnValue`, but on `window` targets Redmine's
+  bubble-phase handler still runs first and there's no reliable way to
+  un-cancel a `BeforeUnloadEvent` once `returnValue` has been assigned.
+- ✂️ **Now removes the closed cards from the Agile board DOM directly
+  instead of reloading.** We already know which issue IDs closed
+  successfully (from the per-issue progress loop) and we already have
+  DOM references to their cards (from select-mode bookkeeping), so
+  removing the cards achieves the same visible result as a reload —
+  with no navigation, no `beforeunload` dispatch, and no browser
+  prompt. Failed rows stay on the board with their original status so
+  the user can retry them individually.
+
+---
+
+## Version 6.4.2
+
+### Bulk close: no more per-issue username/password prompt
+- 🔐 **Fixed the browser credential dialog that popped once per
+  issue during bulk close.** In 6.4.0/6.4.1 the per-issue update went
+  through Redmine's JSON REST API (`PUT /issues/N.json`). On Redmine
+  instances where the REST API is disabled — or where session-cookie
+  auth is rejected for the JSON API — that endpoint answers `401` with
+  a `WWW-Authenticate: Basic realm="Redmine API"` header, and Chrome's
+  fetch stack responds by popping the browser's Basic Auth dialog
+  once for every issue in the batch. Closing 10 issues meant
+  dismissing 10 credential prompts.
+- 🔁 **Now posts to the HTML form endpoint Redmine's own edit form
+  uses** (`POST /issues/N` with `_method=put`, CSRF token, session
+  cookie). Session-authenticated, no basic-auth challenge, no dialog.
+  Progress reporting stays per-issue and success/failure detection is
+  actually more robust — Redmine 302s on success, re-renders the edit
+  form with an `#errorExplanation` block on validation failure, so
+  each failed row now surfaces Redmine's own error text instead of a
+  bare HTTP status.
+- 🚪 **Session-expired detection.** If the request follows a
+  redirect to `/login` the issue is marked failed with "Session
+  expired — reload Redmine and sign in again" rather than being
+  reported as closed.
+
+---
+
+## Version 6.4.1
 
 ### OpenAI key moved to extension-isolated storage
 - 🔒 **The OpenAI API key no longer lives in Redmine's `localStorage`.**
