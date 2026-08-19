@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      6.5.14
+// @version      6.5.16
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -513,13 +513,17 @@ As a <role>, I want <goal> so that <benefit>.
             "Always respond with a JSON object containing exactly these keys:",
             '- "reply": a short, friendly message to the reporter (max 2 sentences) about what you produced or what you still need.',
             '- "subject": a concise, specific ' + t.noun + ' title (<= 120 chars). Use an empty string if there is not enough information yet.',
-            '- "description": the full ' + t.noun + ' formatted using EXACTLY this template structure, filling in what the notes provide and keeping the placeholders for anything missing:',
+            '- "description": the full ' + t.noun + ' formatted using EXACTLY this template structure:',
             "-----",
             t.template(),
             "-----",
+            // Explicit "MUST reproduce EVERY heading" wording — otherwise brief
+            // notes let the model drop sections it can't fill instead of
+            // leaving them empty.
+            "CRITICAL FORMATTING RULE: the \"description\" value MUST reproduce EVERY *Heading:* line from the template above, in the same order, with the exact same wording, punctuation and blank-line spacing. For sections you can fill from the notes, place your content directly under the heading. For sections the notes do not cover, output the heading followed by a blank line so the reporter can fill it in later. NEVER omit, rename, merge, or reorder a heading. Do NOT add new headings that were not in the template.",
             t.guide,
-            "Keep the exact *Heading:* labels and the blank-line spacing from the template, and write in clear, professional English with each section kept focused.",
-            "Only use facts the reporter provided. Do not invent steps, credentials, versions, or acceptance criteria that the notes do not imply. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and give a best-effort subject/description."
+            "Write in clear, professional English with each section kept focused.",
+            "Only use facts the reporter provided \u2014 do not invent steps, credentials, versions, or acceptance criteria that the notes do not imply. Leave the corresponding sections as empty headings instead of deleting them. If the notes are too vague to build a report, ask a clarifying question in \"reply\" and still return the full template (with every heading present) in \"description\"."
         ].join("\n");
     }
 
@@ -5756,6 +5760,50 @@ body.qa-selecting .agile-issue{
     --qa-brand-active-bg:  #5a2f2f;
     --qa-brand-focus-ring: rgba(255,157,157,.22);
 }
+
+/* ---------- Bulk checklist add ----------
+   Lives inside Redmine's own <p id="checklist_form"> on the new-issue and
+   issue-edit pages. Kept visually neutral so it blends with Redmine's
+   theme rather than importing #qa-panel's design tokens. */
+.qa-checklist-bulk{
+    display:flex;
+    gap:8px;
+    align-items:stretch;
+    margin:8px 0 0;
+    padding:8px 10px;
+    background:#f6f8fa;
+    border:1px dashed #c9d1d9;
+    border-radius:6px;
+    box-sizing:border-box;
+    max-width:100%;
+}
+.qa-checklist-bulk-input{
+    flex:1 1 auto;
+    min-width:0;
+    min-height:48px;
+    resize:vertical;
+    padding:6px 8px;
+    border:1px solid #d0d7de;
+    border-radius:4px;
+    font-family:inherit;
+    font-size:12px;
+    line-height:1.4;
+    box-sizing:border-box;
+}
+.qa-checklist-bulk-btn{
+    align-self:stretch;
+    padding:6px 14px;
+    border:1px solid #1976d2;
+    border-radius:4px;
+    background:#1976d2;
+    color:#fff;
+    font-size:12px;
+    font-weight:600;
+    cursor:pointer;
+    white-space:nowrap;
+}
+.qa-checklist-bulk-btn:hover{ background:#1565c0; border-color:#1565c0; }
+.qa-checklist-bulk-btn:active{ transform:translateY(1px); }
 `;
     document.head.appendChild(style);
 
@@ -5785,6 +5833,81 @@ body.qa-selecting .agile-issue{
         // Project key is kept in sessionStorage so manual Fill (Alt+F) reuses the
         // assignee. Uncomment below if you prefer a clean slate after auto-fill:
         // sessionStorage.removeItem(STORAGE.project);
+    }
+
+    //////////////////////////////////////////////////////
+    // Bulk Checklist Add
+    //////////////////////////////////////////////////////
+
+    // Redmine's checklists plugin only lets you save ONE item at a time (type
+    // → click "+"). For long test cases this is tedious, so we inject a small
+    // textarea + "Add all" button inside the Checklist section. On click we
+    // split the pasted lines and drive the plugin's own save button once per
+    // line, keeping the plugin's id / position bookkeeping intact.
+    function mountChecklistBulkAdd() {
+        if (location.origin !== REDMINE) return;
+        const list = document.getElementById("checklist_form_items");
+        if (!list) return;
+        const par = list.closest("p#checklist_form") || list.parentElement;
+        if (!par || par.dataset.qaBulk === "1") return;
+        par.dataset.qaBulk = "1";
+
+        const wrap = document.createElement("span");
+        wrap.className = "qa-checklist-bulk";
+        wrap.innerHTML =
+            '<textarea class="qa-checklist-bulk-input" rows="2" ' +
+            'placeholder="Paste multiple checklist items \u2014 one per line \u2014 then click Add all"></textarea>' +
+            '<button type="button" class="qa-checklist-bulk-btn" title="Add every non-empty line as a separate checklist item">Add all</button>';
+        par.appendChild(wrap);
+
+        const input = wrap.querySelector(".qa-checklist-bulk-input");
+        const btn   = wrap.querySelector(".qa-checklist-bulk-btn");
+        btn.addEventListener("click", () => {
+            const lines = input.value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+            if (!lines.length) { toast("Nothing to add"); input.focus(); return; }
+            let added = 0;
+            for (const line of lines) {
+                if (qaAddChecklistItem(line)) added++;
+            }
+            input.value = "";
+            input.focus();
+            toast("Added " + added + " checklist item" + (added === 1 ? "" : "s"));
+            console.info("[QA Assistant] Bulk added " + added + " checklist item(s).");
+        });
+    }
+
+    // Fills the trailing empty checklist row with `text` and clicks Redmine's
+    // own "+" save button so the plugin commits the row and appends a fresh
+    // blank one for the next line.
+    function qaAddChecklistItem(text) {
+        const list = document.getElementById("checklist_form_items");
+        if (!list) return false;
+        const rows = list.querySelectorAll(".checklist-item");
+        if (!rows.length) return false;
+        const target = rows[rows.length - 1];
+        const box = target.querySelector(".edit-box");
+        if (!box) return false;
+        const hidden = target.querySelector(".checklist-subject-hidden");
+        box.value = text;
+        if (hidden) hidden.value = text;
+        // Some builds of the plugin read the subject from input/change; fire
+        // both before the click so the value is definitely captured.
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+        const save = target.querySelector(".save-new-by-button");
+        if (save) save.click();
+        return true;
+    }
+
+    // Redmine replaces the whole issue form over AJAX when the tracker <select>
+    // changes, wiping any prior mount. Watch the content area and re-mount.
+    function observeChecklistSection() {
+        if (location.origin !== REDMINE) return;
+        const root = document.getElementById("content") || document.body;
+        if (!root) return;
+        mountChecklistBulkAdd();
+        const mo = new MutationObserver(() => mountChecklistBulkAdd());
+        mo.observe(root, { childList: true, subtree: true });
     }
 
     //////////////////////////////////////////////////////
@@ -5824,6 +5947,7 @@ body.qa-selecting .agile-issue{
         consumeProjectHash();
         autoFillIfNeeded();
         rememberCurrentBoard();
+        observeChecklistSection();
     }
 
     // Tampermonkey may inject before OR after the page finishes loading. Relying

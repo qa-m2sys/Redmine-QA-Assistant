@@ -2086,3 +2086,47 @@ body.qa-selecting .agile-issue{
     --qa-brand-focus-ring: rgba(255,157,157,.22);
 }
 
+/* ---------- Bulk checklist add ----------
+   Lives inside Redmine's own <p id="checklist_form"> on the new-issue and
+   issue-edit pages. Kept visually neutral so it blends with Redmine's
+   theme rather than importing #qa-panel's design tokens. */
+.qa-checklist-bulk{
+    display:flex;
+    gap:8px;
+    align-items:stretch;
+    margin:8px 0 0;
+    padding:8px 10px;
+    background:#f6f8fa;
+    border:1px dashed #c9d1d9;
+    border-radius:6px;
+    box-sizing:border-box;
+    max-width:100%;
+}
+.qa-checklist-bulk-input{
+    flex:1 1 auto;
+    min-width:0;
+    min-height:48px;
+    resize:vertical;
+    padding:6px 8px;
+    border:1px solid #d0d7de;
+    border-radius:4px;
+    font-family:inherit;
+    font-size:12px;
+    line-height:1.4;
+    box-sizing:border-box;
+}
+.qa-checklist-bulk-btn{
+    align-self:stretch;
+    padding:6px 14px;
+    border:1px solid #1976d2;
+    border-radius:4px;
+    background:#1976d2;
+    color:#fff;
+    font-size:12px;
+    font-weight:600;
+    cursor:pointer;
+    white-space:nowrap;
+}
+.qa-checklist-bulk-btn:hover{ background:#1565c0; border-color:#1565c0; }
+.qa-checklist-bulk-btn:active{ transform:translateY(1px); }
+

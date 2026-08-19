@@ -5,7 +5,51 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.5.14 — current
+## Version 6.5.16 — current
+
+### Bulk-add multiple checklist items at once
+- ➕ **New "Add all" affordance inside Redmine's Checklist section**
+  (new-issue and issue-edit pages, all trackers that expose the
+  checklist plugin). A small textarea + button appears right under
+  the existing one-at-a-time input.
+- 📚 **Paste a whole block, get one row per line.** The extension
+  splits your text on newlines, drops blanks, and drives Redmine's
+  own "+" save button once per line — so ids, positions and the
+  plugin's own bookkeeping stay identical to a hand-typed row.
+- 🔁 **Survives tracker changes.** Selecting a different tracker
+  triggers Redmine's AJAX form reload; a MutationObserver re-mounts
+  the bulk box as soon as the new form is in place.
+- 🎯 **Especially handy on Test case** — paste the AI's "Test
+  Steps" or "Acceptance Criteria" bullets, click Add all, done.
+
+---
+
+## Version 6.5.15
+
+### AI bug reports: no more missing sections on brief notes
+- 🩹 **Fixed the AI dropping headings** (Steps, Expected
+  Scenario, Video, Credentials) when the user's notes were
+  short. On a fresh install with the shipped default template,
+  the model read "keep the placeholders" too loosely and, when
+  combined with the "do not invent" rule, deleted sections it
+  couldn't fill instead of leaving them empty.
+- 🛡️ **Prompt hardening.** `aiSystemPrompt()` now issues an
+  explicit `CRITICAL FORMATTING RULE`: every `*Heading:*` line
+  from the template MUST appear in the description, in order,
+  with the exact wording — empty sections output the heading
+  followed by a blank line. Deleting, renaming, merging, or
+  reordering headings is explicitly forbidden.
+- 🧭 **Anti-invention rule sharpened.** "Do not invent facts"
+  is now paired with "Leave the corresponding sections as empty
+  headings instead of deleting them", resolving the tension
+  that was causing the drop.
+- 🎯 Affects Bug, Feature, Task, User story, and Suggestion
+  trackers. Test case uses its own `system()` override (added
+  in 6.5.14) and is unaffected.
+
+---
+
+## Version 6.5.14
 
 ### Test case tracker: senior-QA coverage checklist prompt
 - 🧪 **New AI behaviour for the Test case tracker.** The
