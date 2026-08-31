@@ -1305,9 +1305,9 @@ As a <role>, I want <goal> so that <benefit>.
     const FEEDBACK_STATUS_REGEX   = /feedback/i;
     const FEEDBACK_STATUS_DISPLAY = "Feedback";
 
-    // Priority id for Urgent — only used by the sprint audit's
-    // shippability verdict. Change if this instance renumbered priorities.
-    const URGENT_PRIORITY_ID = "4";
+    // Priority ids treated as ship-blocking by the sprint audit — Urgent (4)
+    // and Immediate (5). Change if this instance renumbered priorities.
+    const URGENT_PRIORITY_IDS = ["4", "5"];
 
     // Extract { projectSlug, versionId } from the current agile board URL.
     // The pathname carries the project (`/projects/<slug>/agile/board/…`)
@@ -2055,7 +2055,7 @@ As a <role>, I want <goal> so that <benefit>.
             ? ("/projects/" + encodeURIComponent(projectSlug) + "/issues")
             : "/issues";
 
-        // Urgent-still-open — single list query, no journal scan.
+        // Urgent/Immediate-still-open — single list query, no journal scan.
         async function fetchUrgentStillOpen() {
             const params = new URLSearchParams();
             params.append("set_filter", "1");
@@ -2066,7 +2066,7 @@ As a <role>, I want <goal> so that <benefit>.
             }
             params.append("f[]", "priority_id");
             params.append("op[priority_id]", "=");
-            params.append("v[priority_id][]", URGENT_PRIORITY_ID);
+            URGENT_PRIORITY_IDS.forEach(id => params.append("v[priority_id][]", id));
             params.append("f[]", "status_id");
             params.append("op[status_id]", "o");
             params.append("c[]", "tracker");
@@ -2181,7 +2181,7 @@ As a <role>, I want <goal> so that <benefit>.
         const urgentOpenFiltered = urgentOpen.filter(notExcluded);
         if (urgentOpenFiltered.length) verdict.blockers.push({
             type: "urgent",
-            label: urgentOpenFiltered.length + " Urgent ticket" + (urgentOpenFiltered.length === 1 ? "" : "s") + " still open",
+            label: urgentOpenFiltered.length + " Urgent/Immediate ticket" + (urgentOpenFiltered.length === 1 ? "" : "s") + " still open",
             rows: urgentOpenFiltered
         });
         if (mismatched.length) verdict.warnings.push({

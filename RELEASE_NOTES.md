@@ -18,6 +18,10 @@ For features and usage, see the [README](README.md).
   hashchange/popstate so switching sprints refetches.
 - 📊 Single "Scanning journals…" progress line replaces the two
   separate reopen/feedback status messages.
+- 🚨 **Urgent-still-open blocker now covers Immediate priority too** —
+  the verdict was silently skipping `Immediate` (priority id 5); it now
+  queries both ids and the label reads *"N Urgent/Immediate tickets
+  still open"*.
 
 ### 💾 Persistent journal caches (audit + reopen)
 - 🗄 The audit's per-issue journal parse is now stored in
