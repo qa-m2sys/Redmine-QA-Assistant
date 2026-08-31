@@ -998,6 +998,7 @@
     color:var(--qa-text);
     box-shadow:var(--qa-shadow-btn-hover);
 }
+.qa-btn[hidden]{ display:none; }
 .qa-btn:hover::before{ width:3px; }
 /* Beat the Redmine theme's a:hover underline (higher specificity). */
 #qa-panel .qa-btn:hover,
@@ -2130,3 +2131,363 @@ body.qa-selecting .agile-issue{
 .qa-checklist-bulk-btn:hover{ background:#1565c0; border-color:#1565c0; }
 .qa-checklist-bulk-btn:active{ transform:translateY(1px); }
 
+/* ---------- Analyze Ticket ---------- */
+/* Panel section: single primary button, styled like the other action rows. */
+.qa-analyze-wrap[hidden]{ display:none; }
+.qa-analyze-row{ display:flex; }
+.qa-analyze-row .qa-btn{ flex:1; }
+
+/* The analysis report is a full Markdown document, so the modal gets
+   a wider footprint than the confirmation dialogs and a scrollable
+   body that comfortably fits ~30 lines before the user scrolls. */
+#qa-analyze-modal .qa-modal{
+    width:min(720px, 100%);
+    min-height:min(560px, calc(100vh - 64px));
+}
+#qa-analyze-modal .qa-modal-body{
+    flex:1 1 auto;
+    padding:16px 20px;
+    gap:0;
+    font-size:13px;
+    line-height:1.55;
+    color:var(--qa-text);
+}
+.qa-analyze-loading{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:24px 0;
+    font-size:13px;
+    color:var(--qa-muted);
+}
+.qa-analyze-loading[hidden]{ display:none; }
+.qa-analyze-report[hidden]{ display:none; }
+.qa-analyze-report h3{
+    font-size:13px;
+    font-weight:700;
+    color:var(--qa-brand-strong);
+    margin:18px 0 6px;
+    padding-bottom:4px;
+    border-bottom:1px solid var(--qa-border);
+}
+.qa-analyze-report h3:first-child{ margin-top:0; }
+.qa-analyze-report h4{
+    font-size:12.5px;
+    font-weight:600;
+    margin:14px 0 4px;
+    color:var(--qa-text);
+}
+.qa-analyze-report p{ margin:6px 0; }
+.qa-analyze-report ul,
+.qa-analyze-report ol{
+    margin:6px 0 6px 20px;
+    padding:0;
+}
+.qa-analyze-report li{ margin:3px 0; }
+.qa-analyze-report code{
+    background:var(--qa-surface-alt);
+    padding:1px 5px;
+    border-radius:4px;
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Code", monospace;
+    font-size:12px;
+}
+.qa-analyze-report pre{
+    background:var(--qa-surface-alt);
+    padding:10px 12px;
+    border-radius:8px;
+    overflow-x:auto;
+    font-size:12px;
+    margin:8px 0;
+}
+.qa-analyze-report pre code{
+    background:transparent;
+    padding:0;
+    border-radius:0;
+}
+.qa-analyze-report a{
+    color:var(--qa-brand);
+    text-decoration:none;
+}
+.qa-analyze-report a:hover{ text-decoration:underline; }
+.qa-analyze-report strong{ color:var(--qa-text); }
+
+/* ---------- Similar closed tickets ---------- */
+/* Panel section (issue detail pages only). Cache is warm on most
+   revisits so the transient states (status / empty) are rare. */
+.qa-similar-wrap[hidden]{ display:none; }
+.qa-similar-status{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 2px;
+    font-size:12px;
+    color:var(--qa-text-soft);
+}
+.qa-similar-status[hidden]{ display:none; }
+.qa-similar-empty{
+    padding:6px 2px;
+    font-size:12px;
+    color:var(--qa-muted);
+}
+.qa-similar-empty[hidden]{ display:none; }
+.qa-similar-list{
+    list-style:none;
+    margin:6px 0 0 0;
+    padding:0;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+}
+.qa-similar-list[hidden]{ display:none; }
+.qa-similar-item a{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    padding:8px 10px;
+    background:var(--qa-surface-2);
+    border:1px solid var(--qa-border);
+    border-radius:8px;
+    text-decoration:none;
+    color:var(--qa-text);
+    transition:background 120ms, border-color 120ms;
+}
+.qa-similar-item a:hover{
+    background:var(--qa-brand-tint);
+    border-color:var(--qa-brand);
+}
+.qa-similar-row-top{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:11px;
+}
+.qa-similar-id{
+    font-weight:600;
+    color:var(--qa-brand);
+}
+.qa-similar-badge{
+    padding:1px 6px;
+    border-radius:10px;
+    background:var(--qa-surface-inset);
+    color:var(--qa-text-soft);
+    font-size:10px;
+    font-weight:600;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+}
+.qa-similar-score{
+    margin-left:auto;
+    font-variant-numeric:tabular-nums;
+    font-size:11px;
+    font-weight:600;
+    color:var(--qa-text-soft);
+}
+.qa-similar-subject{
+    font-size:13px;
+    line-height:1.35;
+    color:var(--qa-text);
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    line-clamp:2;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+}
+.qa-similar-meta{
+    font-size:11px;
+    color:var(--qa-muted);
+}
+.qa-similar-actions{
+    display:flex;
+    margin-top:8px;
+}
+.qa-similar-actions .qa-btn{ flex:1; }
+
+/* Copy button injected beside the Redmine issue header <h2>Bug #NNNN</h2>. */
+/* Lives outside #qa-panel scope — pure static styling, no CSS variables. */
+.qa-issue-copy-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    vertical-align:middle;
+    margin-left:10px;
+    padding:4px 6px;
+    background:transparent;
+    border:1px solid rgba(0,0,0,0.18);
+    border-radius:6px;
+    color:#555;
+    cursor:pointer;
+    line-height:1;
+    transition:background 120ms ease,border-color 120ms ease,color 120ms ease;
+}
+.qa-issue-copy-btn svg{ width:15px; height:15px; stroke:currentColor; }
+.qa-issue-copy-btn:hover{ background:rgba(0,0,0,0.05); border-color:rgba(0,0,0,0.3); color:#111; }
+.qa-issue-copy-btn:active{ background:rgba(0,0,0,0.09); }
+.qa-issue-copy-btn:focus-visible{ outline:2px solid #4f8cff; outline-offset:2px; }
+
+/* Sprint audit modal (v7.2.0). Mirrors the reopened-issues modal chrome
+   and adds section-based report styling. */
+#qa-audit-modal .qa-modal.qa-audit-modal{
+    width:min(760px, 100%);
+    max-height:calc(100vh - 64px);
+}
+.qa-audit-loading{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:32px 16px;
+    color:var(--qa-text);
+    font-size:13px;
+    opacity:0.8;
+}
+.qa-audit-loading[hidden]{ display:none; }
+.qa-audit-report{
+    padding:0 4px;
+}
+.qa-audit-section{
+    margin-bottom:18px;
+}
+.qa-audit-section h3{
+    margin:0 0 8px 0;
+    font-size:14px;
+    font-weight:600;
+    letter-spacing:0.02em;
+    color:var(--qa-text);
+}
+.qa-audit-section p{
+    margin:0 0 6px 0;
+    font-size:13px;
+    color:var(--qa-text);
+}
+.qa-audit-verdict-line{
+    font-size:14px;
+    padding:8px 12px;
+    border-radius:6px;
+}
+.qa-audit-verdict-yes{
+    background:rgba(34,197,94,0.10);
+    color:#166534;
+}
+.qa-audit-verdict-no{
+    background:rgba(239,68,68,0.10);
+    color:#991b1b;
+}
+.qa-modal-overlay.qa-dark .qa-audit-verdict-yes{ color:#86efac; background:rgba(34,197,94,0.14); }
+.qa-modal-overlay.qa-dark .qa-audit-verdict-no{  color:#fca5a5; background:rgba(239,68,68,0.14); }
+.qa-audit-verdict-list{
+    list-style:none;
+    margin:8px 0 0 0;
+    padding:0;
+}
+.qa-audit-verdict-list li{
+    padding:4px 0;
+    font-size:13px;
+    line-height:1.5;
+}
+.qa-audit-blocker{ color:#991b1b; }
+.qa-audit-warning{ color:#92400e; }
+.qa-modal-overlay.qa-dark .qa-audit-blocker{ color:#fca5a5; }
+.qa-modal-overlay.qa-dark .qa-audit-warning{ color:#fcd34d; }
+.qa-audit-ids a{
+    color:inherit;
+    text-decoration:none;
+    margin:0 2px;
+    font-weight:500;
+}
+.qa-audit-ids a:hover{ text-decoration:underline; }
+.qa-audit-see-more{
+    background:transparent;
+    border:0;
+    padding:0 2px;
+    margin:0;
+    color:inherit;
+    font:inherit;
+    font-weight:500;
+    text-decoration:underline;
+    cursor:pointer;
+    opacity:0.85;
+}
+.qa-audit-see-more:hover{ opacity:1; }
+.qa-audit-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+    margin-top:4px;
+}
+.qa-audit-table th,
+.qa-audit-table td{
+    padding:5px 8px;
+    border-bottom:1px solid rgba(0,0,0,0.06);
+    text-align:right;
+    color:var(--qa-text);
+}
+.qa-audit-table th{
+    font-weight:600;
+    opacity:0.7;
+    font-size:12px;
+}
+.qa-audit-table th:first-child,
+.qa-audit-table td:first-child{ text-align:left; }
+.qa-modal-overlay.qa-dark .qa-audit-table th,
+.qa-modal-overlay.qa-dark .qa-audit-table td{ border-color:rgba(255,255,255,0.08); }
+.qa-audit-list{
+    list-style:none;
+    margin:0;
+    padding:0;
+    max-height:180px;
+    overflow-y:auto;
+    font-size:13px;
+}
+.qa-audit-list li{
+    padding:3px 0;
+    color:var(--qa-text);
+    line-height:1.5;
+}
+.qa-audit-list a{
+    color:var(--qa-brand, #4f8cff);
+    text-decoration:none;
+    font-weight:500;
+    margin-right:4px;
+}
+.qa-audit-list a:hover{ text-decoration:underline; }
+.qa-audit-partial{
+    color:#92400e;
+    font-size:11px;
+    font-weight:500;
+    margin-left:4px;
+}
+.qa-modal-overlay.qa-dark .qa-audit-partial{ color:#fcd34d; }
+.qa-audit-partial-banner{
+    background:#fef3c7;
+    border:1px solid #fcd34d;
+    color:#78350f;
+    border-radius:6px;
+    padding:10px 12px;
+    margin-bottom:14px;
+    font-size:12px;
+    line-height:1.5;
+}
+.qa-audit-partial-banner strong{ color:#78350f; }
+.qa-modal-overlay.qa-dark .qa-audit-partial-banner{
+    background:rgba(252, 211, 77, 0.12);
+    border-color:rgba(252, 211, 77, 0.45);
+    color:#fde68a;
+}
+.qa-modal-overlay.qa-dark .qa-audit-partial-banner strong{ color:#fef3c7; }
+.qa-audit-tally{
+    font-size:13px;
+    color:var(--qa-text);
+    line-height:1.8;
+}
+.qa-audit-toggle{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    margin-right:auto;
+    font-size:12px;
+    color:var(--qa-text);
+    opacity:0.85;
+    cursor:pointer;
+    user-select:none;
+}
+.qa-audit-toggle input{ accent-color:var(--qa-brand, #4f8cff); }
+.qa-audit-toggle[hidden]{ display:none; }

@@ -5,7 +5,188 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 6.5.16 — current
+## Version 7.2.1 — current
+
+### ⚡ Sprint audit: 2× faster
+- 🔀 Reopen and Feedback journal scans are now **one combined pass** —
+  each ticket's history is fetched once and checked against both
+  statuses, cutting HTTP by half.
+- ⏱ Wall-clock cap raised to 4 minutes so large sprints (~500 tickets)
+  finish in a single click without falling back to "(partial)".
+- 💾 **Per-board cache** — re-opening the same sprint's audit is now
+  instant when the previous scan finished cleanly. Cache clears on
+  hashchange/popstate so switching sprints refetches.
+- 📊 Single "Scanning journals…" progress line replaces the two
+  separate reopen/feedback status messages.
+
+### 💾 Persistent journal caches (audit + reopen)
+- 🗄 The audit's per-issue journal parse is now stored in
+  `localStorage["qa.audit.journalCache.v1"]` (LRU, 500 entries) — a
+  second audit run against overlapping tickets replays the parse
+  instead of re-fetching `/issues/N?tab=history`.
+- 🔁 Reopened-issues detection gets its own
+  `localStorage["qa.reopen.journalCache.v1"]` cache with the same
+  budget. Revisiting the reopened list on the same day is instant.
+- 🧪 Test Case tickets are skipped from both scans (they never go
+  through Reopen / Feedback in this workflow), trimming another chunk
+  of noise.
+
+### 🔎 Similar closed tickets panel
+- 🆕 **New "Similar closed tickets" section** on every issue detail
+  page (`/issues/<n>`) — auto-populates on load with up to 5 closed
+  tickets in the same project whose subject overlaps the current one.
+- 🧮 Ranking is client-side: subject tokens are stop-worded + stemmed
+  to keywords, scored by **Jaccard overlap** with a same-tracker
+  bonus, thresholded at 15%, top 5.
+- 🗂 Each row shows `#id · Tracker · score%` + a 2-line-clamped
+  subject + the closed version (e.g. *Closed in v9.4.0*) and opens
+  in a new tab.
+- 🔄 **Refresh** button re-runs the search bypassing the cache; every
+  other visit is served instantly from
+  `localStorage["qa.similar.v1"]` (keyed by issue id, signed by
+  `subject|tracker` so a rename auto-invalidates it).
+
+---
+
+## Version 7.2.0
+
+### 📋 Sprint audit
+- 🚦 **New "Audit this sprint" button** on Agile board pages produces a
+  one-click end-of-sprint report against the current version.
+- ❌ **Verdict block** lists shippability blockers (still-in-Reopen tickets,
+  Urgent tickets still open) and warnings (Closed tickets missing the Closed
+  Version tag, untriaged tickets with no assignee) with jump-links.
+- 📊 **Report sections:** Overview (total / closed / open / %),
+  Volume by tracker table, Untriaged list, Churn (Feedback bounces) with
+  count + %, Reopens with count + % of closed tickets.
+- 👤 **Per-assignee breakdown** (Closed-by and Reopens-against) hidden behind
+  a "Show individual assignee stats" toggle so day-to-day usage stays
+  team-neutral.
+- 📋 **Copy report** button emits the full audit as Markdown — table,
+  section headings, verdict summary — ready to paste into a sprint-review
+  ticket, wiki page, or Slack thread.
+- 🔄 Reuses the reopened-issues journal scanner for both the reopen and
+  feedback churn counts, so the audit inherits the same wall-clock cap and
+  resume behaviour on large sprints.
+
+---
+
+## Version 7.1.1
+
+### Issue copy: single-asterisk bold
+- ✏️ Switched the clipboard payload's bold marker from `**Bug #NNNN**`
+  to `*Bug #NNNN*` — matches Redmine / Textile's own bold syntax so
+  the pasted block renders correctly when dropped back into another
+  Redmine ticket or wiki page.
+
+---
+
+## Version 7.1.0
+
+### One-click copy of the issue title + link
+- 📋 **New copy button beside `Bug #NNNN`** on every issue detail
+  page. One click and the clipboard receives a Markdown-ready block
+  — perfect for pasting into Slack, PR descriptions, or release notes.
+- 🔔 Confirmation toast ("Issue copied to clipboard") fires from the
+  same in-page surface the rest of the panel uses.
+- 🛡️ Falls back to a friendly "clipboard blocked" toast if the
+  browser refuses `navigator.clipboard.writeText`.
+
+Example payload:
+
+    *Bug #23021* : UI Auto-Capitalizing First Character of Advance Setting Name
+    https://redmine.kernello.com/issues/23021
+
+---
+
+## Version 7.0.1
+
+### Analyze Ticket: prompt tuned for both dev and QA readers
+- 👥 **Audience-neutral opener.** The analyser now writes for
+  whoever's opening the ticket next — dev picking it up, QA about
+  to test a delivered fix, or an assignee taking over a hand-off
+  — and uses `status`, `assignee`, `tracker` + the latest journal
+  notes to figure out the lifecycle stage before framing the
+  report.
+- ✍️ **Ticket summary can breathe.** Dropped the "2-3 sentences"
+  cap. Length now scales with how much detail the ticket carries
+  — tight for a one-liner, several paragraphs for a rich one.
+- 🔄 **"What changes are being requested" → "What changes are
+  being made".** Renamed + reframed so the same section works
+  both directions: it describes work the dev is *about to do*
+  when the ticket is fresh, and work the dev *already did* when
+  the ticket is Resolved / handed to QA — pulling from the
+  description AND the latest journal comments.
+- 🔎 Explicitly tells the model to cite journal notes when they
+  add information the description doesn't.
+
+---
+
+## Version 7.0.0
+
+### Analyze Ticket — QA-friendly AI walk-through of any issue
+- 🧠 **New "Analyze Ticket" section** appears below "Close this
+  issue" on every issue detail page (`/issues/<n>`). One button:
+  **Analyze this ticket**.
+- 📝 **Scrapes the whole ticket in one go** — subject, tracker,
+  status, priority, assignee, target version, the full
+  description, every checklist item (with tick state) and the
+  last 5 journal comments (clipped to a shared 4k budget so long
+  threads can't blow the context window).
+- 🧑‍🔬 **Written for a QA reviewer, not a marketing team.** The
+  AI replies with a warm, human-toned Markdown report split into
+  fixed sections — *Ticket summary*, *What changes are being
+  requested*, *What to expect after the change*, *Questions worth
+  asking*, *Edge cases*, *Suggested test cases*, *Risks /
+  regression areas*, *Assumptions the AI made*. Sections that
+  genuinely don't apply are omitted rather than padded.
+- 💬 **Wide, themed modal** with your current accent + dark/light
+  mode, a spinner while the model thinks, rendered Markdown
+  (headings, lists, bold, italics, links, code) once it lands.
+- 📋 **Copy button** grabs the *raw Markdown* — paste it into a
+  Slack thread, a test-plan doc, a Redmine comment, whatever.
+- 🔑 **Zero new plumbing.** Reuses your saved OpenAI key + the
+  model you already chose in AI mode. No new permissions, no new
+  storage keys.
+
+### Housekeeping
+- 🏗️ Bumped to **7.0.0** to mark this as the first release that
+  adds a genuinely new AI workflow beyond the report drafter.
+- 🧹 Version scheme in the repo memory brought in line with
+  actual practice (both artifacts share the same three-part
+  version, not `x.y.0` vs `x.y`).
+
+---
+
+## Version 6.5.17
+
+### Bulk close: Closed Version list no longer disappears
+- 💬 Users on the Agile board reported "Enter select mode" showing
+  an empty Closed Version dropdown — sometimes accompanied by a
+  toast about the bulk-edit form.
+- 🔍 **Root cause.** `fetchBulkEditContext()` bundled three things
+  (CSRF, closed-status id, version list) into one promise and
+  threw on **"Couldn't find a 'Closed' status"** when both
+  fallbacks missed — which happens when the board has the
+  **Closed column hidden** *and* the representative issue's
+  workflow has no direct N→Closed transition. That throw killed
+  the successfully-parsed version list one line above it.
+- 🪝 **Hardcoded fallback.** Added `CLOSED_STATUS_ID = "5"` (the
+  Closed status id on this Redmine instance, confirmed via the
+  agile column header `<th data-column-id="5">Closed</th>`).
+  Same pattern already used for `REOPEN_STATUS_ID = "8"`. When
+  both dynamic lookups miss, the hardcode wins — versions load,
+  the actual close POST still works.
+- ✨ **Widened the closed-column regex** from
+  `/(?:^|\W)closed(?:\W|$)/i` to `/closed/i` so themes that
+  collapse the count badge into `"Closed245"` (no delimiter)
+  still match.
+- 🗣️ Toast copy updated to "Couldn't load the Closed Version
+  list" so users know which UI element failed.
+
+---
+
+## Version 6.5.16
 
 ### Bulk-add multiple checklist items at once
 - ➕ **New "Add all" affordance inside Redmine's Checklist section**

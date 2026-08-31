@@ -511,6 +511,208 @@ As a <role>, I want <goal> so that <benefit>.
         };
     }
 
+    //////////////////////////////////////////////////////
+    // Analyze Ticket (issue detail pages)
+    //////////////////////////////////////////////////////
+
+    // System prompt for the ticket analyser. Kept in one place so
+    // every future tweak (section names, tone knobs) touches a single spot.
+    function analyzeSystemPrompt() {
+        return [
+            "You are a senior product engineer producing a briefing for whoever is opening this Redmine ticket next — that reader could be the developer picking the work up, the QA about to test a delivered fix, the assignee taking over a hand-off, or a reviewer taking a look. You do not know which one, so write for all of them.",
+            "The reporter will paste a JSON payload with the ticket's title, tracker, status, priority, assignee, target version, description, checklist and the most recent journal notes.",
+            "Use `status`, `assignee`, `tracker` and the tone of the description + latest journal notes to figure out the lifecycle stage: is this a fresh request awaiting implementation, work in progress, or already-delivered work being handed back for QA / review? Frame every section from that angle.",
+            "Reply in warm, human, professional English — write as if you were briefing a teammate on Slack, not authoring a spec. No corporate fluff, no emoji, no bullet-lists of the obvious.",
+            "Produce a Markdown report with these `##` sections in this exact order, and OMIT any section you genuinely cannot fill from the payload rather than padding it:",
+            "",
+            "## Ticket summary",
+            "A descriptive, plain-English recap of what this ticket is about — what it's asking for, or what it appears to have delivered, depending on where it sits in its lifecycle. Match the length to how much detail the ticket actually carries: keep it tight for a thin one-liner ticket, expand to several paragraphs for a rich one. There is no fixed sentence limit — be as descriptive as the source material justifies.",
+            "",
+            "## What changes are being made",
+            "If the ticket is still open (New / In Progress / awaiting implementation), describe the changes the developer is expected to make, based on the description + checklist.",
+            "If the ticket appears to already be resolved or handed back for QA (Resolved / Ready for QA / assigned to a tester with latest journal notes describing work done), describe the changes that were actually made, based on the description AND what the latest journal comments say the developer did. Cite the journal notes when they add information the description doesn't.",
+            "Either way, keep it concrete and actionable — not marketing language.",
+            "",
+            "## What to expect after the change",
+            "The user-visible or system-level behaviour that should be true once the change lands. Useful both for the dev sanity-checking their work before hand-off and for the QA verifying it.",
+            "",
+            "## Questions worth asking",
+            "Sharp, specific clarifying questions the reader might want to raise with the reporter, the developer, the assignee, or the PM. Skip generic questions ('what browser?', 'any screenshot?') unless the ticket text implies they matter.",
+            "",
+            "## Edge cases",
+            "Concrete edge cases derived from the ticket text and typical failure modes for this kind of change. Useful to both a dev (things to guard against) and a QA (things to explicitly test).",
+            "",
+            "## Suggested test cases",
+            "A numbered list of test cases, one per line. Given / When / Then phrasing welcome. Prioritise the ones that catch regressions in the areas the change touches. Include the happy path and at least one negative / boundary case.",
+            "",
+            "## Risks / regression areas",
+            "Adjacent features or code paths that could break because of this change.",
+            "",
+            "## Assumptions the AI made",
+            "Anything the reader should double-check before trusting the rest of the analysis. If you made none, write \"None — analysis was based directly on the ticket text.\"",
+            "",
+            "Do NOT invent product-specific facts (URLs, credentials, exact UI copy, version numbers) that aren't in the payload — put those in \"Questions worth asking\" instead.",
+            "Return raw Markdown only — no wrapping code fence, no JSON envelope."
+        ].join("\n");
+    }
+
+    // Reads the current issue detail page (view mode) and returns a compact
+    // JSON payload for the analyser. Every field is best-effort — missing
+    // pieces just come back empty rather than throwing, so a stripped-down
+    // Redmine theme still yields a usable payload.
+    function scrapeTicketForAnalysis() {
+        const out = {
+            title: "", tracker: "", status: "", priority: "",
+            assignee: "", target_version: "",
+            description: "", checklist: [], journal_notes: []
+        };
+
+        const hdr = document.querySelector("#content h2, .subject h3, .subject > div > h3");
+        if (hdr) out.title = hdr.textContent.trim().replace(/\s+/g, " ");
+
+        // Redmine renders attribute rows as `.attributes .attribute.<name> .value`;
+        // fall back to a generic value cell if the theme flattens the wrapper.
+        const readAttr = (cls) => {
+            const el = document.querySelector(".attributes .attribute." + cls + " .value")
+                    || document.querySelector(".attributes ." + cls + " .value")
+                    || document.querySelector(".attributes td.value." + cls);
+            return el ? el.textContent.trim().replace(/\s+/g, " ") : "";
+        };
+        out.tracker        = readAttr("tracker");
+        out.status         = readAttr("status");
+        out.priority       = readAttr("priority");
+        out.assignee       = readAttr("assigned-to");
+        out.target_version = readAttr("fixed-version") || readAttr("version");
+
+        const desc = document.querySelector(".description .wiki")
+                  || document.querySelector("#issue_description_wiki");
+        if (desc) out.description = (desc.innerText || desc.textContent || "").trim();
+
+        // Checklists plugin renders `#issue_checklists .checklist-item`; some
+        // themes drop the wrapper id, so we also accept a bare `.checklist-item`.
+        const items = document.querySelectorAll("#issue_checklists .checklist-item, .checklist-item");
+        items.forEach(item => {
+            // Skip edit-mode rows — they carry an .edit-box textarea we don't want.
+            if (item.querySelector(".edit-box")) return;
+            const cb = item.querySelector('input[type="checkbox"]');
+            const lblEl = item.querySelector("label, .subject, .checklist-subject");
+            const label = ((lblEl ? lblEl.textContent : item.textContent) || "")
+                .trim().replace(/\s+/g, " ");
+            if (label) out.checklist.push({ label, checked: !!(cb && cb.checked) });
+        });
+
+        // Last 5 journal notes, oldest→newest, clipped to a shared 4k budget so
+        // a monster comment thread can't blow past the model context window.
+        const notes = Array.from(document.querySelectorAll("#history .journal"))
+            .map(j => {
+                const w = j.querySelector(".notes .wiki, .journal-notes .wiki, .wiki");
+                return w ? ((w.innerText || w.textContent || "").trim()) : "";
+            })
+            .filter(Boolean);
+        let budget = 4000;
+        for (const n of notes.slice(-5)) {
+            if (budget <= 0) break;
+            const clipped = n.length > budget ? n.slice(0, budget) + "…" : n;
+            out.journal_notes.push(clipped);
+            budget -= clipped.length;
+        }
+
+        return out;
+    }
+
+    // Fires a one-shot chat completion with the analyser prompt and returns
+    // the raw Markdown reply. Never uses `response_format: json_object` — this
+    // path wants free-form Markdown, not the reviewer's JSON envelope.
+    async function runTicketAnalysis(payloadObj) {
+        if (!AI.key()) throw new Error("Add your OpenAI API key first");
+        const userMsg = "Analyze this Redmine ticket:\n\n" + JSON.stringify(payloadObj, null, 2);
+        const payload = {
+            model: AI.model(),
+            temperature: 0.4,
+            messages: [
+                { role: "system", content: analyzeSystemPrompt() },
+                { role: "user",   content: userMsg }
+            ]
+        };
+        const data = await aiTransport(payload);
+        const md = data && data.choices && data.choices[0] && data.choices[0].message
+            ? (data.choices[0].message.content || "").trim()
+            : "";
+        if (!md) throw new Error("Empty response from OpenAI");
+        return md;
+    }
+
+    // Minimal Markdown → HTML renderer for the analyser modal. Every text
+    // fragment is HTML-escaped before we splice in tags, so bad input from
+    // the model can't inject scripts. Handles: ## / ### headings, unordered
+    // and ordered lists, paragraphs, `code`, **bold**, *italic*, [links], and
+    // ```fenced``` blocks. Nested lists are not supported (the prompt asks
+    // for flat lists).
+    function renderAnalysisMarkdown(md) {
+        const esc = (s) => String(s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        const inlineFormat = (text) => {
+            let t = esc(text);
+            t = t.replace(/`([^`]+)`/g, "<code>$1</code>");
+            t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+            t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+            t = t.replace(/\[([^\]]+)\]\(([^) ]+)\)/g,
+                (_m, txt, url) => '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + txt + "</a>");
+            return t;
+        };
+        const lines = md.split(/\r?\n/);
+        const out = [];
+        let listType = null;
+        let inCode = false;
+        let paragraph = [];
+        const flushParagraph = () => {
+            if (paragraph.length) {
+                out.push("<p>" + inlineFormat(paragraph.join(" ")) + "</p>");
+                paragraph = [];
+            }
+        };
+        const closeList = () => {
+            if (listType) { out.push("</" + listType + ">"); listType = null; }
+        };
+        for (const raw of lines) {
+            if (/^\s*```/.test(raw)) {
+                flushParagraph(); closeList();
+                if (!inCode) { out.push("<pre><code>"); inCode = true; }
+                else         { out.push("</code></pre>"); inCode = false; }
+                continue;
+            }
+            if (inCode) { out.push(esc(raw)); continue; }
+            if (/^\s*$/.test(raw)) { flushParagraph(); closeList(); continue; }
+            let m;
+            if ((m = raw.match(/^(#{1,4})\s+(.*)$/))) {
+                flushParagraph(); closeList();
+                // Bump one level so `##` renders as h3 — keeps the modal from
+                // dominating with browser-default h1/h2 sizing.
+                const lvl = Math.min(6, m[1].length + 1);
+                out.push("<h" + lvl + ">" + inlineFormat(m[2]) + "</h" + lvl + ">");
+                continue;
+            }
+            if ((m = raw.match(/^\s*[-*]\s+(.*)$/))) {
+                flushParagraph();
+                if (listType !== "ul") { closeList(); out.push("<ul>"); listType = "ul"; }
+                out.push("<li>" + inlineFormat(m[1]) + "</li>");
+                continue;
+            }
+            if ((m = raw.match(/^\s*\d+\.\s+(.*)$/))) {
+                flushParagraph();
+                if (listType !== "ol") { closeList(); out.push("<ol>"); listType = "ol"; }
+                out.push("<li>" + inlineFormat(m[1]) + "</li>");
+                continue;
+            }
+            paragraph.push(raw.trim());
+        }
+        flushParagraph(); closeList();
+        if (inCode) out.push("</code></pre>");
+        return out.join("");
+    }
+
 
     // Returns "dark" or "light". Falls back to the OS preference when unset.
     function getTheme() {
@@ -709,6 +911,14 @@ As a <role>, I want <goal> so that <benefit>.
     // value on an issue. Confirmed from the DOM as
     // <select name="issue[custom_field_values][12]" id="issue_custom_field_values_12">.
     const CLOSED_VERSION_CF_ID = "12";
+
+    // Numeric id of the "Closed" workflow status on this Redmine instance.
+    // Last-resort fallback for the bulk-close path when neither Redmine's
+    // workflow-gated status dropdown nor the agile board's column header
+    // yields it (e.g. board with the Closed column hidden + representative
+    // issue whose workflow forbids a direct N→Closed transition).
+    // Confirmed via the agile board header <th data-column-id="5">Closed</th>.
+    const CLOSED_STATUS_ID = "5";
 
     // /issues/<n>, /issues/<n>/, /issues/<n>/edit — but NOT /issues/new.
     function isIssueDetailPage() {
@@ -934,15 +1144,17 @@ As a <role>, I want <goal> so that <benefit>.
         const statusSel = doc.getElementById("issue_status_id");
         if (statusSel) {
             const opt = Array.from(statusSel.querySelectorAll("option"))
-                .find(o => /(?:^|\W)closed(?:\W|$)/i.test(o.textContent.trim()));
+                .find(o => /closed/i.test(o.textContent.trim()));
             if (opt) closedStatusId = opt.value;
         }
         if (!closedStatusId) {
             const th = Array.from(document.querySelectorAll("th[data-column-id]"))
-                .find(t => /(?:^|\W)closed(?:\W|$)/i.test(t.textContent.trim()));
+                .find(t => /closed/i.test(t.textContent.trim()));
             if (th) closedStatusId = th.getAttribute("data-column-id");
         }
-        if (!closedStatusId) throw new Error("Couldn't find a 'Closed' status");
+        // Hardcoded fallback keeps the version list loadable even when the
+        // Closed column is hidden and the workflow blocks a direct transition.
+        if (!closedStatusId) closedStatusId = CLOSED_STATUS_ID;
 
         // Closed Version custom-field options. Empty list is legal — the
         // panel will simply render just an unassigned choice.
@@ -1087,6 +1299,16 @@ As a <role>, I want <goal> so that <benefit>.
     // was unreliable in 6.5.1.
     const REOPEN_STATUS_ID      = "8";
 
+    // Feedback status — drives the sprint audit's churn scan the same
+    // way REOPEN_STATUS_ID drives the reopen scan.
+    const FEEDBACK_STATUS_ID      = "4";
+    const FEEDBACK_STATUS_REGEX   = /feedback/i;
+    const FEEDBACK_STATUS_DISPLAY = "Feedback";
+
+    // Priority id for Urgent — only used by the sprint audit's
+    // shippability verdict. Change if this instance renumbered priorities.
+    const URGENT_PRIORITY_ID = "4";
+
     // Extract { projectSlug, versionId } from the current agile board URL.
     // The pathname carries the project (`/projects/<slug>/agile/board/…`)
     // and the query string carries `v[fixed_version_id][]=<id>` when the
@@ -1154,6 +1376,7 @@ As a <role>, I want <goal> so that <benefit>.
             params.append("c[]", "status");
             params.append("c[]", "subject");
             params.append("c[]", "assigned_to");
+            params.append("c[]", "updated_on");
             params.append("per_page", "100");
             if (page && page > 1) params.append("page", String(page));
             extraFilters(params);
@@ -1173,12 +1396,14 @@ As a <role>, I want <goal> so that <benefit>.
                 const status  = (tr.querySelector("td.status") || {}).textContent || "";
                 const tracker = (tr.querySelector("td.tracker") || {}).textContent || "";
                 const assignee= (tr.querySelector("td.assigned_to") || {}).textContent || "";
+                const updated = (tr.querySelector("td.updated_on") || {}).textContent || "";
                 rows.push({
                     id: idMatch[1],
                     subject: subject.trim(),
                     status: status.trim(),
                     tracker: tracker.trim(),
-                    assignee: assignee.trim()
+                    assignee: assignee.trim(),
+                    updated_on: updated.trim()
                 });
             });
             // Total-in-query from pagination footer (for truncation reporting).
@@ -1274,6 +1499,21 @@ As a <role>, I want <goal> so that <benefit>.
         const scanStart    = performance.now();
         let checked  = 0;
         let timedOut = false;
+
+        // Persistent per-issue journal cache — repeat scans skip
+        // /issues/<id> when the issue's updated_on hasn't advanced
+        // since we last checked it. patternSig invalidates entries
+        // whenever the reopen-status regex changes.
+        const REOPEN_CACHE_KEY = "qa.reopen.journalCache.v1";
+        const REOPEN_CACHE_MAX = 5000;
+        const patternSig = String(pattern);
+        let jCache = {};
+        try {
+            const raw = localStorage.getItem(REOPEN_CACHE_KEY);
+            if (raw) jCache = JSON.parse(raw) || {};
+        } catch (_) { jCache = {}; }
+        let cacheHits = 0;
+
         if (onProgress) onProgress(checked, candidates.length);
         for (let i = 0; i < candidates.length; i += CONCURRENCY) {
             if (performance.now() - scanStart > SCAN_TIMEOUT_MS) {
@@ -1284,6 +1524,11 @@ As a <role>, I want <goal> so that <benefit>.
             const batch = candidates.slice(i, i + CONCURRENCY);
             const batchStart = performance.now();
             const results = await Promise.all(batch.map(async (issue) => {
+                const cached = jCache[issue.id];
+                if (cached && cached.updated === issue.updated_on && cached.sig === patternSig) {
+                    cacheHits++;
+                    return { issue: issue, match: !!cached.match };
+                }
                 try {
                     const res = await fetch("/issues/" + issue.id, {
                         credentials: "include",
@@ -1291,7 +1536,9 @@ As a <role>, I want <goal> so that <benefit>.
                     });
                     if (!res.ok) return { issue: issue, match: false };
                     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-                    return { issue: issue, match: issueHistoryHasStatus(doc, pattern) };
+                    const match = issueHistoryHasStatus(doc, pattern);
+                    jCache[issue.id] = { updated: issue.updated_on || "", sig: patternSig, match: match, savedAt: Date.now() };
+                    return { issue: issue, match: match };
                 } catch (_) { return { issue: issue, match: false }; }
             }));
             results.forEach(r => {
@@ -1307,9 +1554,21 @@ As a <role>, I want <goal> so that <benefit>.
                     "(batch", Math.round(performance.now() - batchStart), "ms, hits so far", historyMatches.length, ")");
             }
         }
+
+        // Persist the cache; evict oldest entries if it grew past the cap.
+        try {
+            const entries = Object.entries(jCache);
+            if (entries.length > REOPEN_CACHE_MAX) {
+                entries.sort((a, b) => (b[1].savedAt || 0) - (a[1].savedAt || 0));
+                jCache = Object.fromEntries(entries.slice(0, REOPEN_CACHE_MAX));
+            }
+            localStorage.setItem(REOPEN_CACHE_KEY, JSON.stringify(jCache));
+        } catch (_) { /* quota or storage disabled — non-fatal */ }
+
         const scanDurationMs = Math.round(performance.now() - scanStart);
         console.info("[QA Assistant] Historical matches:", historyMatches.length,
-            "(scan took", scanDurationMs, "ms, total scanned across passes:", scannedIds.size, ")");
+            "(scan took", scanDurationMs, "ms, cache hits", cacheHits, "/", candidates.length,
+            ", total scanned across passes:", scannedIds.size, ")");
 
         // Sort by numeric id descending so newest reopened issues
         // surface at the top of the modal.
@@ -1370,6 +1629,755 @@ As a <role>, I want <goal> so that <benefit>.
             if (pattern.test(newVal)) return true;
         }
         return false;
+    }
+
+    //////////////////////////////////////////////////////
+    // Similar closed tickets (issue detail pages)
+    //////////////////////////////////////////////////////
+
+    const SIMILAR_CACHE_KEY    = "qa.similar.v1";
+    const SIMILAR_CACHE_MAX    = 500;
+    const SIMILAR_RESULT_LIMIT = 5;
+    // Empirically: 0.15 keeps sensible near-matches on 3-4 word subjects
+    // while filtering out one-token coincidences ("login" alone etc.).
+    const SIMILAR_MIN_SCORE    = 0.15;
+
+    // Kept small on purpose — over-filtering costs legitimate keywords.
+    const SIMILAR_STOPWORDS = new Set([
+        "a","an","the","and","or","but","if","of","in","on","at","to","for",
+        "with","without","by","from","is","are","was","were","be","been","being",
+        "it","its","this","that","these","those","as","when","while","not","no",
+        "do","does","did","doing","have","has","had","will","would","should","could",
+        "can","cannot","cant","doesnt","isnt","wasnt","werent","dont",
+        "bug","issue","ticket","error","problem","fix","fixed"
+    ]);
+
+    // Lowercase, strip punctuation, drop stopwords + short tokens, dedupe.
+    function similarTokens(text) {
+        if (!text) return [];
+        const raw = String(text).toLowerCase()
+            .replace(/[^a-z0-9\s]+/g, " ")
+            .split(/\s+/);
+        const seen = new Set();
+        const out = [];
+        for (const t of raw) {
+            if (t.length < 3) continue;
+            if (SIMILAR_STOPWORDS.has(t)) continue;
+            if (seen.has(t)) continue;
+            seen.add(t); out.push(t);
+        }
+        return out;
+    }
+
+    // Redmine's subject filter is substring-only. Passing multiple values
+    // as separate `v[subject][]` entries OR's them (`LIKE '%a%' OR LIKE '%b%' …`),
+    // so we hand it the top ~3 most discriminative (longest) tokens and let
+    // the client re-rank the OR'd result set.
+    function similarKeywords(tokens) {
+        return tokens.slice().sort((a, b) => b.length - a.length).slice(0, 3);
+    }
+
+    function similarJaccard(a, b) {
+        if (!a.length || !b.length) return 0;
+        const B = new Set(b);
+        let inter = 0;
+        for (const t of a) if (B.has(t)) inter++;
+        const union = a.length + b.length - inter;
+        return union ? inter / union : 0;
+    }
+
+    // Reads the current issue detail page. Returns null when this isn't
+    // an issue detail view or we can't recover the id / subject.
+    function similarScrapeCurrent() {
+        if (!isIssueDetailPage()) return null;
+        const idMatch = location.pathname.match(/\/issues\/(\d+)/);
+        if (!idMatch) return null;
+
+        // Prefer `.subject h3` (modern Redmine shows the real subject there;
+        // the h2 is just `Tracker #id`). Fall back to `#content h2` for older
+        // themes that render `Tracker #id: subject` in a single line.
+        const subjEl = document.querySelector(".subject h3, .subject > div > h3");
+        let subject = subjEl ? subjEl.textContent.trim().replace(/\s+/g, " ") : "";
+        if (!subject) {
+            const hdr = document.querySelector("#content h2");
+            const rawTitle = hdr ? hdr.textContent.trim().replace(/\s+/g, " ") : "";
+            subject = rawTitle.replace(/^[A-Za-z ]+#\d+:?\s*/, "").trim();
+        }
+        if (!subject) return null;
+
+        const readAttr = (cls) => {
+            const el = document.querySelector(".attributes .attribute." + cls + " .value")
+                    || document.querySelector(".attributes ." + cls + " .value")
+                    || document.querySelector(".attributes td.value." + cls);
+            return el ? el.textContent.trim().replace(/\s+/g, " ") : "";
+        };
+
+        return { id: idMatch[1], subject: subject, tracker: readAttr("tracker") };
+    }
+
+    // The raw Redmine slug the URL uses — projectKeyFromBodyClass() maps
+    // to our internal PROJECT key, which is different.
+    function similarProjectSlug() {
+        if (!document.body || !document.body.className) return null;
+        const m = document.body.className.match(/\bproject-([\w-]+)/);
+        return m ? m[1] : null;
+    }
+
+    // Queries closed tickets in the same project whose subjects overlap
+    // the current issue's, then re-ranks locally. Returns { results, keywords }.
+    async function fetchSimilarClosedTickets(current, projectSlug) {
+        const tokens = similarTokens(current.subject);
+        if (tokens.length < 2) return { results: [], keywords: [] };
+        const keywords = similarKeywords(tokens);
+
+        const basePath = projectSlug
+            ? ("/projects/" + encodeURIComponent(projectSlug) + "/issues")
+            : "/issues";
+        const params = new URLSearchParams();
+        params.append("set_filter", "1");
+        params.append("f[]", "status_id");
+        params.append("op[status_id]", "c");
+        params.append("f[]", "subject");
+        params.append("op[subject]", "~");
+        // Redmine OR's separate `v[subject][]` entries under `~`.
+        keywords.forEach(k => params.append("v[subject][]", k));
+        params.append("c[]", "tracker");
+        params.append("c[]", "status");
+        params.append("c[]", "subject");
+        params.append("c[]", "updated_on");
+        params.append("c[]", "cf_" + CLOSED_VERSION_CF_ID);
+        params.append("sort", "updated_on:desc");
+        params.append("per_page", "40");
+
+        const url = basePath + "?" + params.toString();
+        console.info("[QA Assistant] Similar closed tickets — GET", url);
+        const res = await fetch(url, {
+            credentials: "include",
+            headers: { "Accept": "text/html" }
+        });
+        if (!res.ok) throw new Error("Redmine query failed (HTTP " + res.status + ")");
+        const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+
+        const currentTracker = String(current.tracker || "").toLowerCase();
+        const candidates = [];
+        doc.querySelectorAll("tr[id^='issue-']").forEach(tr => {
+            const m = tr.id.match(/^issue-(\d+)$/);
+            if (!m) return;
+            const id = m[1];
+            if (id === current.id) return;
+            const subject = ((tr.querySelector("td.subject a") || tr.querySelector("td.subject") || {}).textContent || "").trim();
+            const tracker = ((tr.querySelector("td.tracker") || {}).textContent || "").trim();
+            // QA-internal test cases would dominate the ranking otherwise.
+            if (tracker.toLowerCase() === "test case") return;
+            const status = ((tr.querySelector("td.status") || {}).textContent || "").trim();
+            const closedVersion = ((tr.querySelector("td.cf_" + CLOSED_VERSION_CF_ID) || {}).textContent || "").trim();
+            const candTokens = similarTokens(subject);
+            const jacc = similarJaccard(tokens, candTokens);
+            const trackerBoost = (currentTracker && tracker.toLowerCase() === currentTracker) ? 0.3 : 0;
+            const score = jacc * 0.7 + trackerBoost;
+            if (score < SIMILAR_MIN_SCORE) return;
+            candidates.push({ id, subject, tracker, status, closedVersion, score });
+        });
+        candidates.sort((a, b) => b.score - a.score);
+        return { results: candidates.slice(0, SIMILAR_RESULT_LIMIT), keywords: keywords };
+    }
+
+    function similarCacheLoad() {
+        try {
+            const raw = localStorage.getItem(SIMILAR_CACHE_KEY);
+            return raw ? (JSON.parse(raw) || {}) : {};
+        } catch (_) { return {}; }
+    }
+    function similarCacheSave(cache) {
+        try {
+            const entries = Object.entries(cache);
+            let trimmed = cache;
+            if (entries.length > SIMILAR_CACHE_MAX) {
+                entries.sort((a, b) => (b[1].savedAt || 0) - (a[1].savedAt || 0));
+                trimmed = Object.fromEntries(entries.slice(0, SIMILAR_CACHE_MAX));
+            }
+            localStorage.setItem(SIMILAR_CACHE_KEY, JSON.stringify(trimmed));
+        } catch (_) { /* quota or storage disabled — non-fatal */ }
+    }
+    // Ties an entry to the current subject+tracker so a rename invalidates it.
+    function similarCacheSig(current) {
+        return (current.subject || "") + "|" + (current.tracker || "");
+    }
+
+    //////////////////////////////////////////////////////
+    // Sprint audit (Agile board)
+    //////////////////////////////////////////////////////
+
+    // Multi-status variant of issueHistoryHasStatus — walks the journal
+    // once and reports which of the supplied patterns transitioned into.
+    // Short-circuits when every pattern has already matched.
+    function issueHistoryStatusHits(doc, patterns) {
+        const hits = {};
+        patterns.forEach(p => { hits[p.key] = false; });
+        const history = doc.querySelector("#history") || doc.querySelector("#issue-history");
+        if (!history) return hits;
+        const changeItems = history.querySelectorAll("ul.details li");
+        for (const li of changeItems) {
+            const strong = li.querySelector("strong");
+            if (!strong) continue;
+            if (strong.textContent.trim().toLowerCase() !== "status") continue;
+            const values = li.querySelectorAll("i");
+            if (!values.length) continue;
+            const newVal = values[values.length - 1].textContent.trim();
+            let allMatched = true;
+            patterns.forEach(p => {
+                if (!hits[p.key] && p.regex.test(newVal)) hits[p.key] = true;
+                if (!hits[p.key]) allMatched = false;
+            });
+            if (allMatched) break;
+        }
+        return hits;
+    }
+
+    // Combined journal scanner — fetches each candidate's issue detail
+    // page ONCE and reports historical hits for every supplied status
+    // pattern. Halves the audit's HTTP cost vs running fetchReopenedIssues
+    // twice. Also enriches the sprint list with priority + cf_12 so the
+    // audit doesn't need a separate list query.
+    async function scanSprintForStatuses({ projectSlug, versionId, patterns, prevPartial, onProgress }) {
+        const basePath = projectSlug
+            ? ("/projects/" + encodeURIComponent(projectSlug) + "/issues")
+            : "/issues";
+
+        async function queryList(extraFilters) {
+            const rows = [];
+            let total = 0;
+            for (let page = 1; page <= 20; page++) {
+                const params = new URLSearchParams();
+                params.append("set_filter", "1");
+                if (versionId) {
+                    params.append("f[]", "fixed_version_id");
+                    params.append("op[fixed_version_id]", "=");
+                    params.append("v[fixed_version_id][]", versionId);
+                }
+                params.append("c[]", "tracker");
+                params.append("c[]", "status");
+                params.append("c[]", "subject");
+                params.append("c[]", "assigned_to");
+                params.append("c[]", "priority");
+                params.append("c[]", "updated_on");
+                params.append("c[]", "cf_" + CLOSED_VERSION_CF_ID);
+                params.append("per_page", "100");
+                if (page > 1) params.append("page", String(page));
+                extraFilters(params);
+                const res = await fetch(basePath + "?" + params.toString(), {
+                    credentials: "include", headers: { "Accept": "text/html" }
+                });
+                if (!res.ok) throw new Error("Redmine query failed (HTTP " + res.status + ")");
+                const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+                let pageRows = 0;
+                doc.querySelectorAll("tr[id^='issue-']").forEach(tr => {
+                    const m = tr.id.match(/^issue-(\d+)$/);
+                    if (!m) return;
+                    rows.push({
+                        id: m[1],
+                        subject:       ((tr.querySelector("td.subject a") || tr.querySelector("td.subject") || {}).textContent || "").trim(),
+                        status:        ((tr.querySelector("td.status")      || {}).textContent || "").trim(),
+                        tracker:       ((tr.querySelector("td.tracker")     || {}).textContent || "").trim(),
+                        assignee:      ((tr.querySelector("td.assigned_to") || {}).textContent || "").trim(),
+                        priority:      ((tr.querySelector("td.priority")    || {}).textContent || "").trim(),
+                        updated_on:    ((tr.querySelector("td.updated_on")  || {}).textContent || "").trim(),
+                        closedVersion: ((tr.querySelector("td.cf_" + CLOSED_VERSION_CF_ID) || {}).textContent || "").trim()
+                    });
+                    pageRows++;
+                });
+                const items = doc.querySelector(".pagination .items, span.pagination-info");
+                if (items) {
+                    const tm = items.textContent.match(/\/\s*(\d+)/);
+                    if (tm) total = parseInt(tm[1], 10);
+                }
+                if (pageRows === 0) break;
+                if (rows.length >= (total || rows.length)) break;
+            }
+            return { rows: rows, total: total || rows.length };
+        }
+
+        // Resume vs fresh scan. On resume we skip Phase A/B and reuse the
+        // candidate list + hits from the previous partial run.
+        let currentlyAt, phaseB, candidates, historyByPattern;
+        const scannedIds = new Set();
+
+        if (prevPartial && Array.isArray(prevPartial.candidates) && prevPartial.candidates.length) {
+            currentlyAt = prevPartial.currentlyAt || {};
+            patterns.forEach(p => { if (!currentlyAt[p.key]) currentlyAt[p.key] = []; });
+            phaseB = {
+                rows:  prevPartial.allSprintRows    || [],
+                total: prevPartial.sprintTotalCount || 0
+            };
+            candidates       = prevPartial.candidates;
+            historyByPattern = prevPartial.historyByPattern || {};
+            patterns.forEach(p => { if (!historyByPattern[p.key]) historyByPattern[p.key] = []; });
+            (prevPartial.scannedIds || []).forEach(id => scannedIds.add(id));
+            console.info("[QA Assistant] Resuming journal scan from checkpoint:",
+                scannedIds.size, "/", candidates.length, "already checked");
+        } else {
+            // Phase A per pattern — currently at each pattern's status.
+            currentlyAt = {};
+            await Promise.all(patterns.map(async p => {
+                try {
+                    const q = await queryList((params) => {
+                        params.append("f[]", "status_id");
+                        params.append("op[status_id]", "=");
+                        params.append("v[status_id][]", p.statusId);
+                    });
+                    currentlyAt[p.key] = q.rows;
+                } catch (e) {
+                    console.warn("[QA Assistant] Phase A (" + p.key + ") failed:", e);
+                    currentlyAt[p.key] = [];
+                }
+            }));
+            patterns.forEach(p => console.info("[QA Assistant] Phase A", p.key + ":", currentlyAt[p.key].length));
+
+            // Phase B — full sprint list.
+            phaseB = await queryList((params) => { params.append("status_id", "*"); });
+            console.info("[QA Assistant] Phase B (all sprint issues):", phaseB.rows.length, "/", phaseB.total);
+
+            // Subtract union of all Phase-A ids from Phase B candidates.
+            const knownIds = new Set();
+            patterns.forEach(p => currentlyAt[p.key].forEach(r => knownIds.add(r.id)));
+            candidates = phaseB.rows.filter(r => !knownIds.has(r.id));
+            console.info("[QA Assistant] Combined journal scan candidates:", candidates.length);
+
+            historyByPattern = {};
+            patterns.forEach(p => { historyByPattern[p.key] = []; });
+        }
+
+        const CONCURRENCY = 12;
+        const SCAN_TIMEOUT_MS = 240000; // 4 min — combined scan does 2× the work per fetch, so budget is roomier
+        const scanStart = performance.now();
+        const remaining = candidates.filter(c => !scannedIds.has(c.id));
+        let checked = scannedIds.size;
+        let timedOut = false;
+
+        // Persistent per-issue journal cache — repeat audits skip /issues/<id>
+        // when the issue's updated_on hasn't advanced since we last scanned it.
+        // patternSig invalidates entries whenever the pattern set changes.
+        const JOURNAL_CACHE_KEY = "qa.audit.journalCache.v1";
+        const JOURNAL_CACHE_MAX = 5000;
+        const patternSig = patterns.map(p => p.key).slice().sort().join(",");
+        let jCache = {};
+        try {
+            const raw = localStorage.getItem(JOURNAL_CACHE_KEY);
+            if (raw) jCache = JSON.parse(raw) || {};
+        } catch (_) { jCache = {}; }
+        let cacheHits = 0;
+
+        if (onProgress) onProgress(checked, candidates.length);
+        for (let i = 0; i < remaining.length; i += CONCURRENCY) {
+            if (performance.now() - scanStart > SCAN_TIMEOUT_MS) {
+                timedOut = true;
+                console.warn("[QA Assistant] Combined scan hit cap after", checked, "/", candidates.length);
+                break;
+            }
+            const batch = remaining.slice(i, i + CONCURRENCY);
+            const results = await Promise.all(batch.map(async (issue) => {
+                const cached = jCache[issue.id];
+                if (cached && cached.updated === issue.updated_on && cached.sig === patternSig) {
+                    cacheHits++;
+                    return { issue: issue, hits: cached.hits };
+                }
+                try {
+                    const res = await fetch("/issues/" + issue.id, {
+                        credentials: "include", headers: { "Accept": "text/html" }
+                    });
+                    if (!res.ok) return { issue: issue, hits: null };
+                    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+                    const hits = issueHistoryStatusHits(doc, patterns);
+                    jCache[issue.id] = { updated: issue.updated_on || "", sig: patternSig, hits: hits, savedAt: Date.now() };
+                    return { issue: issue, hits: hits };
+                } catch (_) { return { issue: issue, hits: null }; }
+            }));
+            results.forEach(r => {
+                scannedIds.add(r.issue.id);
+                if (!r.hits) return;
+                patterns.forEach(p => { if (r.hits[p.key]) historyByPattern[p.key].push(r.issue); });
+            });
+            checked = scannedIds.size;
+            if (onProgress) onProgress(checked, candidates.length);
+        }
+
+        // Persist the cache; evict oldest entries if it grew past the cap.
+        try {
+            const entries = Object.entries(jCache);
+            if (entries.length > JOURNAL_CACHE_MAX) {
+                entries.sort((a, b) => (b[1].savedAt || 0) - (a[1].savedAt || 0));
+                jCache = Object.fromEntries(entries.slice(0, JOURNAL_CACHE_MAX));
+            }
+            localStorage.setItem(JOURNAL_CACHE_KEY, JSON.stringify(jCache));
+        } catch (_) { /* quota or storage disabled — non-fatal */ }
+
+        console.info("[QA Assistant] Combined scan done in", Math.round(performance.now() - scanStart), "ms;",
+            "cache hits:", cacheHits, "/", remaining.length, ";",
+            patterns.map(p => p.key + "=" + historyByPattern[p.key].length).join(", "),
+            (timedOut ? "(partial)" : ""));
+
+        const perPattern = {};
+        patterns.forEach(p => {
+            const merged = currentlyAt[p.key].concat(historyByPattern[p.key])
+                .sort((a, b) => parseInt(b.id, 10) - parseInt(a.id, 10));
+            perPattern[p.key] = {
+                rows: merged,
+                count: merged.length,
+                currentlyAt: currentlyAt[p.key]
+            };
+        });
+
+        return {
+            perPattern:       perPattern,
+            allSprintRows:    phaseB.rows,
+            sprintTotalCount: phaseB.total,
+            scannedCount:     checked,
+            totalCandidates:  candidates.length,
+            timedOut:         timedOut,
+            // Only kept when the scan bailed early so the next click can
+            // pick up where we left off.
+            resumeState: timedOut ? {
+                candidates:       candidates,
+                scannedIds:       Array.from(scannedIds),
+                historyByPattern: historyByPattern,
+                currentlyAt:      currentlyAt,
+                allSprintRows:    phaseB.rows,
+                sprintTotalCount: phaseB.total
+            } : null
+        };
+    }
+
+    // One-click end-of-sprint report against a Redmine version. Returns a
+    // structured audit object (overview, per-tracker volume, churn, reopens,
+    // assignee stats, verdict). The UI layer renders it into the audit modal.
+    async function runSprintAudit({ projectSlug, versionId, prevPartial, onProgress }) {
+        const basePath = projectSlug
+            ? ("/projects/" + encodeURIComponent(projectSlug) + "/issues")
+            : "/issues";
+
+        // Urgent-still-open — single list query, no journal scan.
+        async function fetchUrgentStillOpen() {
+            const params = new URLSearchParams();
+            params.append("set_filter", "1");
+            if (versionId) {
+                params.append("f[]", "fixed_version_id");
+                params.append("op[fixed_version_id]", "=");
+                params.append("v[fixed_version_id][]", versionId);
+            }
+            params.append("f[]", "priority_id");
+            params.append("op[priority_id]", "=");
+            params.append("v[priority_id][]", URGENT_PRIORITY_ID);
+            params.append("f[]", "status_id");
+            params.append("op[status_id]", "o");
+            params.append("c[]", "tracker");
+            params.append("c[]", "subject");
+            params.append("per_page", "100");
+            try {
+                const res = await fetch(basePath + "?" + params.toString(), {
+                    credentials: "include", headers: { "Accept": "text/html" }
+                });
+                if (!res.ok) return [];
+                const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+                const out = [];
+                doc.querySelectorAll("tr[id^='issue-']").forEach(tr => {
+                    const m = tr.id.match(/^issue-(\d+)$/);
+                    if (!m) return;
+                    out.push({
+                        id: m[1],
+                        tracker: ((tr.querySelector("td.tracker") || {}).textContent || "").trim(),
+                        subject: ((tr.querySelector("td.subject a") || tr.querySelector("td.subject") || {}).textContent || "").trim()
+                    });
+                });
+                return out;
+            } catch (_) { return []; }
+        }
+
+        if (onProgress) onProgress(prevPartial ? "Resuming…" : "Preparing…", 0, 0);
+        const [scanResult, urgentOpen] = await Promise.all([
+            scanSprintForStatuses({
+                projectSlug: projectSlug,
+                versionId:   versionId,
+                patterns: [
+                    { key: "reopen",   regex: REOPEN_STATUS_REGEX,   statusId: REOPEN_STATUS_ID },
+                    { key: "feedback", regex: FEEDBACK_STATUS_REGEX, statusId: FEEDBACK_STATUS_ID }
+                ],
+                prevPartial: prevPartial && prevPartial.resumeState ? prevPartial.resumeState : null,
+                onProgress: (done, total) => {
+                    if (!onProgress) return;
+                    if (total > 0) onProgress("Scanning journals…", done, total);
+                    else onProgress("Fetching sprint list…", 0, 0);
+                }
+            }),
+            fetchUrgentStillOpen()
+        ]);
+        console.info("[QA Assistant] Sprint audit —",
+            "sprint:", scanResult.allSprintRows.length,
+            "urgent-open:", urgentOpen.length,
+            "reopens:", scanResult.perPattern.reopen.count,
+            "feedback:", scanResult.perPattern.feedback.count,
+            scanResult.timedOut ? "(partial)" : "");
+
+        // Test cases are QA-internal artefacts — exclude them from every
+        // aggregate the audit reports on (overview, tracker breakdown,
+        // untriaged, missing Closed version, reopens, churn, urgent).
+        const EXCLUDED_TRACKERS = new Set(["test case"]);
+        const notExcluded = (r) => !EXCLUDED_TRACKERS.has(String(r.tracker || "").toLowerCase());
+
+        const sprintRows  = scanResult.allSprintRows.filter(notExcluded);
+        const isClosed    = (s) => /closed/i.test(s || "");
+        const totalIssues = sprintRows.length;
+        const closedRows  = sprintRows.filter(r => isClosed(r.status));
+        const openRows    = sprintRows.filter(r => !isClosed(r.status));
+
+        const bucket = new Map();
+        sprintRows.forEach(r => {
+            const key = r.tracker || "(none)";
+            if (!bucket.has(key)) bucket.set(key, { name: key, total: 0, closed: 0, open: 0 });
+            const b = bucket.get(key);
+            b.total++;
+            if (isClosed(r.status)) b.closed++; else b.open++;
+        });
+        const byTracker = [];
+        TRACKER_ORDER.forEach(k => {
+            const nm = TRACKERS[k].name;
+            if (bucket.has(nm)) { byTracker.push(bucket.get(nm)); bucket.delete(nm); }
+        });
+        Array.from(bucket.values()).forEach(b => byTracker.push(b));
+
+        const untriaged = sprintRows
+            .filter(r => !r.assignee)
+            .map(r => ({ id: r.id, subject: r.subject }));
+
+        const mismatched = closedRows
+            .filter(r => !r.closedVersion)
+            .map(r => ({ id: r.id, subject: r.subject }));
+
+        // Proxy: reopened row's current assignee ≈ dev responsible when it
+        // was reopened, since QA usually reassigns back to the dev on reopen.
+        function tally(rows, keyFn) {
+            const m = new Map();
+            rows.forEach(r => {
+                const k = keyFn(r) || "(unassigned)";
+                m.set(k, (m.get(k) || 0) + 1);
+            });
+            return Array.from(m.entries())
+                .map(([name, count]) => ({ name: name, count: count }))
+                .sort((a, b) => b.count - a.count);
+        }
+        const closedByAssignee = tally(closedRows, r => r.assignee);
+        const reopenRows       = scanResult.perPattern.reopen.rows.filter(notExcluded);
+        const feedbackRows     = scanResult.perPattern.feedback.rows.filter(notExcluded);
+        const reopensAgainst   = tally(reopenRows, r => r.assignee);
+
+        // Historical reopens that are now closed don't block ship.
+        const currentlyReopened = reopenRows.filter(r => /reopen/i.test(r.status));
+
+        const verdict = { blockers: [], warnings: [] };
+        if (currentlyReopened.length) verdict.blockers.push({
+            type: "reopen",
+            label: currentlyReopened.length + " ticket" + (currentlyReopened.length === 1 ? "" : "s") + " still in " + REOPEN_STATUS_DISPLAY,
+            rows: currentlyReopened
+        });
+        const urgentOpenFiltered = urgentOpen.filter(notExcluded);
+        if (urgentOpenFiltered.length) verdict.blockers.push({
+            type: "urgent",
+            label: urgentOpenFiltered.length + " Urgent ticket" + (urgentOpenFiltered.length === 1 ? "" : "s") + " still open",
+            rows: urgentOpenFiltered
+        });
+        if (mismatched.length) verdict.warnings.push({
+            type: "mismatch",
+            label: mismatched.length + " Closed ticket" + (mismatched.length === 1 ? "" : "s") + " missing Closed Version tag",
+            rows: mismatched
+        });
+        if (untriaged.length) verdict.warnings.push({
+            type: "untriaged",
+            label: untriaged.length + " untriaged ticket" + (untriaged.length === 1 ? "" : "s") + " (no assignee)",
+            rows: untriaged
+        });
+
+        const closedPct   = totalIssues > 0 ? Math.round((closedRows.length / totalIssues) * 100) : 0;
+        const reopenPct   = closedRows.length > 0 ? Math.round((reopenRows.length / closedRows.length) * 100) : 0;
+        const feedbackPct = totalIssues > 0 ? Math.round((feedbackRows.length / totalIssues) * 100) : 0;
+
+        return {
+            overview: { total: totalIssues, closed: closedRows.length, open: openRows.length, closedPct: closedPct },
+            byTracker: byTracker,
+            untriaged: untriaged,
+            feedback:  { count: feedbackRows.length, pct: feedbackPct, rows: feedbackRows, timedOut: scanResult.timedOut },
+            reopens:   { count: reopenRows.length,   pct: reopenPct,   rows: reopenRows,   timedOut: scanResult.timedOut, closedTotal: closedRows.length },
+            assignees: { closedBy: closedByAssignee, reopensAgainst: reopensAgainst },
+            verdict:   verdict,
+            partial:   scanResult.timedOut,
+            resumeState: scanResult.resumeState
+        };
+    }
+
+    // Serialise an audit result as Markdown. `showAssignees` gates the two
+    // per-name sections so the copied Markdown matches what's on screen.
+    function renderSprintAuditMarkdown(audit, versionLabel, showAssignees) {
+        const lines = [];
+        lines.push("# Sprint audit — " + (versionLabel || "current sprint"));
+        lines.push("");
+        if (audit.partial) {
+            lines.push("> ⚠ **Partial results.** The journal scan hit its 4-minute cap before every ticket was checked, so Reopens and Churn counts below may undercount. Re-run the audit or narrow the board to get complete numbers.");
+            lines.push("");
+        }
+        const nB = audit.verdict.blockers.length;
+        const nW = audit.verdict.warnings.length;
+        const shippable = nB === 0;
+        lines.push("## Verdict");
+        lines.push("Ready to ship: " + (shippable ? "YES" : "NO") +
+            " — " + nB + " blocker" + (nB === 1 ? "" : "s") +
+            ", " + nW + " warning" + (nW === 1 ? "" : "s") + ".");
+        audit.verdict.blockers.forEach(b => {
+            const ids = b.rows.slice(0, 10).map(r => "#" + r.id).join(", ");
+            const extra = b.rows.length > 10 ? ", …" : "";
+            lines.push("- ❌ " + b.label + (ids ? " (" + ids + extra + ")" : ""));
+        });
+        audit.verdict.warnings.forEach(w => {
+            const ids = w.rows.slice(0, 10).map(r => "#" + r.id).join(", ");
+            const extra = w.rows.length > 10 ? ", …" : "";
+            lines.push("- ⚠ " + w.label + (ids ? " (" + ids + extra + ")" : ""));
+        });
+        lines.push("");
+        lines.push("## Overview");
+        lines.push("Total: " + audit.overview.total +
+            " · Closed: " + audit.overview.closed + " (" + audit.overview.closedPct + "%)" +
+            " · Open: " + audit.overview.open);
+        lines.push("");
+        if (audit.byTracker.length) {
+            lines.push("## Volume by tracker");
+            lines.push("| Tracker | Total | Closed | Open |");
+            lines.push("|---------|------:|-------:|-----:|");
+            audit.byTracker.forEach(b => {
+                lines.push("| " + b.name + " | " + b.total + " | " + b.closed + " | " + b.open + " |");
+            });
+            lines.push("");
+        }
+        if (audit.untriaged.length) {
+            lines.push("## Untriaged: " + audit.untriaged.length + " ticket" + (audit.untriaged.length === 1 ? "" : "s"));
+            audit.untriaged.forEach(u => {
+                lines.push("- #" + u.id + " · " + (u.subject || "(no subject)"));
+            });
+            lines.push("");
+        }
+        if (audit.feedback.count) {
+            lines.push("## Churn (Feedback bounces): " + audit.feedback.count + " ticket" + (audit.feedback.count === 1 ? "" : "s") + ", " + audit.feedback.pct + "%");
+            audit.feedback.rows.forEach(r => {
+                const url = location.origin + "/issues/" + r.id;
+                lines.push("- [#" + r.id + "](" + url + ") · " + (r.subject || "(no subject)"));
+            });
+            lines.push("");
+        }
+        if (audit.reopens.count) {
+            lines.push("## Reopens: " + audit.reopens.count + " ticket" + (audit.reopens.count === 1 ? "" : "s") + ", " + audit.reopens.pct + "% (" + audit.reopens.count + " / " + audit.reopens.closedTotal + " closed)");
+            audit.reopens.rows.forEach(r => {
+                const url = location.origin + "/issues/" + r.id;
+                lines.push("- [#" + r.id + "](" + url + ") · " + (r.subject || "(no subject)"));
+            });
+            lines.push("");
+        }
+        if (showAssignees && audit.assignees.closedBy.length) {
+            lines.push("## Closed by assignee");
+            lines.push(audit.assignees.closedBy.map(a => a.name + " " + a.count).join(" · "));
+            lines.push("");
+        }
+        if (showAssignees && audit.assignees.reopensAgainst.length) {
+            lines.push("## Reopens against");
+            lines.push(audit.assignees.reopensAgainst.map(a => a.name + " " + a.count).join(" · "));
+            lines.push("");
+        }
+        return lines.join("\n").trim() + "\n";
+    }
+
+    // Plain-text variant — same content as renderSprintAuditMarkdown but
+    // stripped of Markdown syntax so it can be pasted into email, Teams,
+    // release-manager DMs, etc. without rendering artifacts.
+    function renderSprintAuditPlain(audit, versionLabel, showAssignees) {
+        const lines = [];
+        const rule = (s, ch) => ch.repeat(Math.max(s.length, 3));
+        const heading = (s) => { lines.push(s); lines.push(rule(s, "-")); };
+        const title = "Sprint audit — " + (versionLabel || "current sprint");
+        lines.push(title);
+        lines.push(rule(title, "="));
+        lines.push("");
+
+        if (audit.partial) {
+            lines.push("[!] PARTIAL RESULTS — the journal scan hit its 4-minute cap before every ticket was checked.");
+            lines.push("    Reopens and Churn counts below may undercount. Re-run the audit or narrow the board");
+            lines.push("    (e.g. by tracker or assignee) to get complete numbers.");
+            lines.push("");
+        }
+        const nB = audit.verdict.blockers.length;
+        const nW = audit.verdict.warnings.length;
+        const shippable = nB === 0;
+        heading("Verdict");
+        lines.push("Ready to ship: " + (shippable ? "YES" : "NO") +
+            " — " + nB + " blocker" + (nB === 1 ? "" : "s") +
+            ", " + nW + " warning" + (nW === 1 ? "" : "s") + ".");
+        audit.verdict.blockers.forEach(b => {
+            const ids = b.rows.slice(0, 10).map(r => "#" + r.id).join(", ");
+            const extra = b.rows.length > 10 ? ", …" : "";
+            lines.push("  [X] " + b.label + (ids ? " (" + ids + extra + ")" : ""));
+        });
+        audit.verdict.warnings.forEach(w => {
+            const ids = w.rows.slice(0, 10).map(r => "#" + r.id).join(", ");
+            const extra = w.rows.length > 10 ? ", …" : "";
+            lines.push("  [!] " + w.label + (ids ? " (" + ids + extra + ")" : ""));
+        });
+        lines.push("");
+
+        heading("Overview");
+        lines.push("Total: " + audit.overview.total +
+            " · Closed: " + audit.overview.closed + " (" + audit.overview.closedPct + "%)" +
+            " · Open: " + audit.overview.open);
+        lines.push("");
+
+        if (audit.byTracker.length) {
+            heading("Volume by tracker");
+            const nameW = Math.max.apply(null, audit.byTracker.map(b => b.name.length).concat([7]));
+            audit.byTracker.forEach(b => {
+                const nm = b.name + " ".repeat(nameW - b.name.length);
+                lines.push("  " + nm + "   Total " + String(b.total).padStart(4) +
+                    "   Closed " + String(b.closed).padStart(4) +
+                    "   Open " + String(b.open).padStart(4));
+            });
+            lines.push("");
+        }
+        if (audit.untriaged.length) {
+            heading("Untriaged: " + audit.untriaged.length + " ticket" + (audit.untriaged.length === 1 ? "" : "s"));
+            audit.untriaged.forEach(u => {
+                lines.push("  #" + u.id + " · " + (u.subject || "(no subject)"));
+            });
+            lines.push("");
+        }
+        if (audit.feedback.count) {
+            heading("Churn (Feedback bounces): " + audit.feedback.count + " ticket" + (audit.feedback.count === 1 ? "" : "s") + ", " + audit.feedback.pct + "%");
+            audit.feedback.rows.forEach(r => {
+                const url = location.origin + "/issues/" + r.id;
+                lines.push("  #" + r.id + " · " + (r.subject || "(no subject)") + " · " + url);
+            });
+            lines.push("");
+        }
+        if (audit.reopens.count) {
+            heading("Reopens: " + audit.reopens.count + " ticket" + (audit.reopens.count === 1 ? "" : "s") + ", " + audit.reopens.pct + "% (" + audit.reopens.count + " / " + audit.reopens.closedTotal + " closed)");
+            audit.reopens.rows.forEach(r => {
+                const url = location.origin + "/issues/" + r.id;
+                lines.push("  #" + r.id + " · " + (r.subject || "(no subject)") + " · " + url);
+            });
+            lines.push("");
+        }
+        if (showAssignees && audit.assignees.closedBy.length) {
+            heading("Closed by assignee");
+            lines.push(audit.assignees.closedBy.map(a => a.name + " " + a.count).join(" · "));
+            lines.push("");
+        }
+        if (showAssignees && audit.assignees.reopensAgainst.length) {
+            heading("Reopens against");
+            lines.push(audit.assignees.reopensAgainst.map(a => a.name + " " + a.count).join(" · "));
+            lines.push("");
+        }
+        return lines.join("\n").trim() + "\n";
     }
 
     //////////////////////////////////////////////////////
@@ -1594,6 +2602,40 @@ As a <role>, I want <goal> so that <benefit>.
                     </div>
                 </div>` : "";
 
+        // "Analyze Ticket" section — rendered on every Redmine page but
+        // self-hides via [hidden] until isIssueDetailPage() confirms an
+        // issue detail view. On click it scrapes title/description/checklist
+        // (+ optional metadata + last journal notes) and asks the AI for a
+        // QA-friendly report, shown in the wide analysis modal below.
+        const analyzeTicketHtml = onRedmine ? `
+                <div class="qa-analyze-wrap" id="qa-analyze-wrap" hidden>
+                    <div class="qa-divider"></div>
+                    <div class="qa-section-label">Analyze Ticket</div>
+                    <div class="qa-analyze-row">
+                        <button class="qa-btn qa-tmpl-btn qa-action" data-action="analyze-ticket" id="qa-analyze-btn" type="button" title="Ask the AI for a QA-friendly analysis of this ticket"><span class="qa-btn-icon">${svgIcon("sparkles")}</span><span class="qa-btn-label" id="qa-analyze-btn-label">Analyze this ticket</span></button>
+                    </div>
+                </div>` : "";
+
+        // "Similar closed tickets" section — issue detail pages only. Runs
+        // a token-ranked substring search against Redmine's closed-issue
+        // list scoped to the current project and renders the top matches
+        // inline (no modal). Cache lives in localStorage so revisiting
+        // the same ticket doesn't hit the network.
+        const similarClosedHtml = onRedmine ? `
+                <div class="qa-similar-wrap" id="qa-similar-wrap" hidden>
+                    <div class="qa-divider"></div>
+                    <div class="qa-section-label">Similar closed tickets</div>
+                    <div class="qa-similar-status" id="qa-similar-status" role="status">
+                        <span class="qa-spinner" aria-hidden="true"></span>
+                        <span class="qa-similar-status-text">Searching…</span>
+                    </div>
+                    <ul class="qa-similar-list" id="qa-similar-list" hidden></ul>
+                    <div class="qa-similar-empty" id="qa-similar-empty" hidden>No similar closed tickets found in this project.</div>
+                    <div class="qa-similar-actions">
+                        <button class="qa-btn qa-tmpl-btn" data-action="similar-refresh" id="qa-similar-refresh" type="button" title="Search again (bypass cache)"><span class="qa-btn-icon">${svgIcon("rotate-ccw")}</span><span class="qa-btn-label">Refresh</span></button>
+                    </div>
+                </div>` : "";
+
         // "Close multiple issues" section — only rendered on Redmine, and only
         // made visible on Agile board pages (populated at init). Enters a
         // "select mode" that overlays a checkbox on every card so the user
@@ -1674,6 +2716,17 @@ As a <role>, I want <goal> so that <benefit>.
                     <div class="qa-reopened-warn" id="qa-reopened-warn" role="status" hidden>Partially synced. Please sync again to get remaining issues.</div>
                 </div>` : "";
 
+        // Sprint audit — end-of-sprint report button. Shares the reopened-row
+        // markup for a consistent Agile-board section look.
+        const auditWrapHtml = onRedmine ? `
+                <div class="qa-audit-wrap" id="qa-audit-wrap" hidden>
+                    <div class="qa-divider"></div>
+                    <div class="qa-section-label">Sprint audit</div>
+                    <div class="qa-reopened-row">
+                        <button class="qa-btn qa-tmpl-btn qa-action" data-action="show-audit" id="qa-show-audit" type="button" title="Run an end-of-sprint audit against the current board's version"><span class="qa-btn-icon">${svgIcon("check-square")}</span><span class="qa-btn-label" id="qa-show-audit-label">Audit this sprint</span></button>
+                    </div>
+                </div>` : "";
+
         // View-only modal that displays the reopened-issues result set.
         // Same overlay chrome as the bulk-close modal (theme, close X,
         // list styling) but no confirm button, no note, no version —
@@ -1693,6 +2746,58 @@ As a <role>, I want <goal> so that <benefit>.
                         <div class="qa-modal-actions">
                             <button class="qa-btn qa-tmpl-btn qa-action" data-action="reopened-copy" id="qa-reopened-copy" type="button" title="Copy the list (id + subject with hyperlinks) to the clipboard"><span class="qa-btn-icon">${svgIcon("copy")}</span><span class="qa-btn-label" id="qa-reopened-copy-label">Copy list</span></button>
                             <button class="qa-btn qa-tmpl-btn qa-action" data-action="reopened-close" type="button"><span class="qa-btn-label">Close</span></button>
+                        </div>
+                    </div>
+                </div>` : "";
+
+        // Sprint audit modal — wider than the confirmation modals; contains
+        // a Verdict + several report sections rendered from runSprintAudit().
+        const auditModalHtml = onRedmine ? `
+                <div class="qa-modal-overlay" id="qa-audit-modal" hidden role="dialog" aria-modal="true" aria-labelledby="qa-audit-modal-title">
+                    <div class="qa-modal qa-audit-modal">
+                        <div class="qa-modal-header">
+                            <span class="qa-modal-title" id="qa-audit-modal-title">Sprint audit</span>
+                            <button class="qa-hbtn qa-modal-close" data-action="audit-close" type="button" title="Close">${svgIcon("x")}</button>
+                        </div>
+                        <div class="qa-modal-body">
+                            <div class="qa-audit-loading" id="qa-audit-loading">
+                                <span class="qa-spinner" aria-hidden="true"></span>
+                                <span id="qa-audit-loading-text">Running audit…</span>
+                            </div>
+                            <div class="qa-audit-report" id="qa-audit-report" hidden></div>
+                        </div>
+                        <div class="qa-modal-actions">
+                            <label class="qa-audit-toggle" id="qa-audit-toggle-wrap" hidden>
+                                <input type="checkbox" id="qa-audit-show-assignees">
+                                <span>Show individual assignee stats</span>
+                            </label>
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="audit-copy" id="qa-audit-copy" disabled type="button" title="Copy full report as Markdown"><span class="qa-btn-icon">${svgIcon("copy")}</span><span class="qa-btn-label">Copy report</span></button>
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="audit-copy-plain" id="qa-audit-copy-plain" disabled type="button" title="Copy full report as plain text (no Markdown)"><span class="qa-btn-icon">${svgIcon("copy")}</span><span class="qa-btn-label">Copy plain</span></button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="audit-close" type="button"><span class="qa-btn-label">Close</span></button>
+                        </div>
+                    </div>
+                </div>` : "";
+
+        // Ticket-analysis modal — wider than the confirmation modals since
+        // the AI's report is a multi-section Markdown document. Same overlay
+        // chrome (theme + accent classes mirrored at open time).
+        const analyzeModalHtml = onRedmine ? `
+                <div class="qa-modal-overlay" id="qa-analyze-modal" hidden role="dialog" aria-modal="true" aria-labelledby="qa-analyze-modal-title">
+                    <div class="qa-modal qa-modal-wide">
+                        <div class="qa-modal-header">
+                            <span class="qa-modal-title" id="qa-analyze-modal-title">Ticket analysis</span>
+                            <button class="qa-hbtn qa-modal-close" data-action="analyze-close" type="button" title="Close">${svgIcon("x")}</button>
+                        </div>
+                        <div class="qa-modal-body">
+                            <div class="qa-analyze-loading" id="qa-analyze-loading">
+                                <span class="qa-spinner" aria-hidden="true"></span>
+                                <span>Analyzing this ticket…</span>
+                            </div>
+                            <div class="qa-analyze-report" id="qa-analyze-report" hidden></div>
+                        </div>
+                        <div class="qa-modal-actions">
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="analyze-copy" id="qa-analyze-copy" disabled type="button" title="Copy the analysis to the clipboard as Markdown"><span class="qa-btn-icon">${svgIcon("copy")}</span><span class="qa-btn-label" id="qa-analyze-copy-label">Copy</span></button>
+                            <button class="qa-btn qa-tmpl-btn" data-action="analyze-close" type="button"><span class="qa-btn-label">Close</span></button>
                         </div>
                     </div>
                 </div>` : "";
@@ -1726,8 +2831,11 @@ As a <role>, I want <goal> so that <benefit>.
                 <div class="qa-project-grid" id="qa-project-list" hidden>${projectButtons}</div>
                 ${templateHtml}
                 ${closeIssueHtml}
+                ${analyzeTicketHtml}
+                ${similarClosedHtml}
                 ${bulkCloseHtml}
                 ${reopenedIssuesHtml}
+                ${auditWrapHtml}
                 <div class="qa-divider"></div>
                 <div class="qa-section-label">Agile Boards</div>
                 <div class="qa-boards-row" id="qa-boards-wrap">
@@ -1737,6 +2845,8 @@ As a <role>, I want <goal> so that <benefit>.
             </div>
             ${bulkModalHtml}
             ${reopenedModalHtml}
+            ${auditModalHtml}
+            ${analyzeModalHtml}
         `;
 
         document.body.appendChild(panel);
@@ -2105,6 +3215,198 @@ As a <role>, I want <goal> so that <benefit>.
                 }
             }
 
+            // ---- Analyze Ticket (issue detail pages) ----
+            // Reuses the AI transport already wired up for the report drafter,
+            // so no extra key/model plumbing here — we just scrape the page,
+            // ask, and render.
+            const analyzeWrap    = panel.querySelector("#qa-analyze-wrap");
+            const analyzeBtn     = panel.querySelector("#qa-analyze-btn");
+            const analyzeBtnLbl  = panel.querySelector("#qa-analyze-btn-label");
+            const analyzeModal   = panel.querySelector("#qa-analyze-modal");
+            const analyzeLoading = analyzeModal && analyzeModal.querySelector("#qa-analyze-loading");
+            const analyzeReport  = analyzeModal && analyzeModal.querySelector("#qa-analyze-report");
+            const analyzeCopyBtn = analyzeModal && analyzeModal.querySelector("#qa-analyze-copy");
+            // Move to document.body so the panel's overflow/backdrop-filter
+            // don't clip the overlay (same trick as the bulk-close modal).
+            if (analyzeModal) document.body.appendChild(analyzeModal);
+
+            let analyzeRawMd   = "";
+            let analyzeRunning = false;
+
+            function openAnalyzeModal() {
+                if (!analyzeModal) return;
+                analyzeModal.className = "qa-modal-overlay";
+                if (panel.classList.contains("qa-dark")) analyzeModal.classList.add("qa-dark");
+                Array.from(panel.classList).forEach(c => {
+                    if (c.indexOf("qa-accent-") === 0) analyzeModal.classList.add(c);
+                });
+                analyzeModal.hidden = false;
+                requestAnimationFrame(() => analyzeModal.classList.add("qa-modal-open"));
+            }
+            function closeAnalyzeModal() {
+                if (!analyzeModal) return;
+                analyzeModal.classList.remove("qa-modal-open");
+                setTimeout(() => { analyzeModal.hidden = true; }, 180);
+            }
+
+            if (analyzeModal) {
+                analyzeModal.querySelectorAll('[data-action="analyze-close"]').forEach(b =>
+                    b.addEventListener("click", (e) => { e.stopPropagation(); closeAnalyzeModal(); }));
+                // Backdrop click closes; clicks inside .qa-modal don't bubble past it.
+                analyzeModal.addEventListener("click", (e) => {
+                    if (e.target === analyzeModal) closeAnalyzeModal();
+                });
+            }
+
+            if (analyzeCopyBtn) {
+                analyzeCopyBtn.addEventListener("click", async () => {
+                    if (!analyzeRawMd) return;
+                    try {
+                        await navigator.clipboard.writeText(analyzeRawMd);
+                        toast("Analysis copied");
+                    } catch (_) {
+                        toast("Couldn't copy — check clipboard permissions");
+                    }
+                });
+            }
+
+            if (analyzeBtn) {
+                analyzeBtn.addEventListener("click", async () => {
+                    if (analyzeRunning) return;
+                    if (!AI.key()) { toast("Add your OpenAI API key first"); return; }
+                    const payloadObj = scrapeTicketForAnalysis();
+                    if (!payloadObj || (!payloadObj.title && !payloadObj.description)) {
+                        toast("Nothing to analyze on this ticket");
+                        return;
+                    }
+                    analyzeRunning = true;
+                    analyzeBtn.disabled = true;
+                    if (analyzeBtnLbl) analyzeBtnLbl.textContent = "Analyzing…";
+                    analyzeRawMd = "";
+                    if (analyzeReport) { analyzeReport.innerHTML = ""; analyzeReport.hidden = true; }
+                    if (analyzeLoading) analyzeLoading.hidden = false;
+                    if (analyzeCopyBtn) analyzeCopyBtn.disabled = true;
+                    openAnalyzeModal();
+                    try {
+                        const md = await runTicketAnalysis(payloadObj);
+                        analyzeRawMd = md;
+                        if (analyzeReport) {
+                            analyzeReport.innerHTML = renderAnalysisMarkdown(md);
+                            analyzeReport.hidden = false;
+                        }
+                        if (analyzeLoading) analyzeLoading.hidden = true;
+                        if (analyzeCopyBtn) analyzeCopyBtn.disabled = false;
+                    } catch (err) {
+                        closeAnalyzeModal();
+                        toast(err.message || "Couldn't analyze the ticket");
+                        console.info("[QA Assistant] Analyze failed:", err);
+                    } finally {
+                        analyzeRunning = false;
+                        analyzeBtn.disabled = false;
+                        if (analyzeBtnLbl) analyzeBtnLbl.textContent = "Analyze this ticket";
+                    }
+                });
+            }
+
+            if (analyzeWrap && isIssueDetailPage()) analyzeWrap.hidden = false;
+
+            // ---- Similar closed tickets (issue detail pages) ----
+            // Auto-runs once per ticket view. Results cached in localStorage
+            // and invalidated by the ticket's subject+tracker signature.
+            const similarWrap      = panel.querySelector("#qa-similar-wrap");
+            const similarStatus    = panel.querySelector("#qa-similar-status");
+            const similarStatusTxt = similarStatus && similarStatus.querySelector(".qa-similar-status-text");
+            const similarList      = panel.querySelector("#qa-similar-list");
+            const similarEmpty     = panel.querySelector("#qa-similar-empty");
+            const similarRefresh   = panel.querySelector("#qa-similar-refresh");
+
+            function similarShowStatus(text, spinner) {
+                if (!similarStatus) return;
+                similarStatus.hidden = false;
+                if (similarStatusTxt) similarStatusTxt.textContent = text;
+                const s = similarStatus.querySelector(".qa-spinner");
+                if (s) s.style.display = spinner ? "" : "none";
+                if (similarList)  { similarList.hidden  = true; similarList.innerHTML = ""; }
+                if (similarEmpty) similarEmpty.hidden = true;
+            }
+            function similarShowEmpty() {
+                if (similarStatus) similarStatus.hidden = true;
+                if (similarList)   { similarList.hidden = true; similarList.innerHTML = ""; }
+                if (similarEmpty)  similarEmpty.hidden = false;
+            }
+            function similarRenderResults(results) {
+                if (!similarList) return;
+                if (!results || !results.length) { similarShowEmpty(); return; }
+                if (similarStatus) similarStatus.hidden = true;
+                if (similarEmpty)  similarEmpty.hidden  = true;
+                similarList.innerHTML = results.map(r => {
+                    const pct = Math.round(r.score * 100);
+                    const trackerCls = "qa-similar-badge qa-similar-tracker-" + String(r.tracker || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+                    const href = REDMINE + "/issues/" + r.id;
+                    const meta = r.closedVersion ? ("Closed in " + escapeText(r.closedVersion)) : "Closed";
+                    return `
+                        <li class="qa-similar-item">
+                            <a href="${href}" target="_blank" rel="noopener" title="${escapeText(r.subject)}">
+                                <span class="qa-similar-row-top">
+                                    <span class="qa-similar-id">#${escapeText(r.id)}</span>
+                                    <span class="${trackerCls}">${escapeText(r.tracker || "")}</span>
+                                    <span class="qa-similar-score" title="${pct}% keyword overlap">${pct}%</span>
+                                </span>
+                                <span class="qa-similar-subject">${escapeText(r.subject)}</span>
+                                <span class="qa-similar-meta">${meta}</span>
+                            </a>
+                        </li>`;
+                }).join("");
+                similarList.hidden = false;
+            }
+
+            // Small local HTML-escaper — model output goes into innerHTML.
+            function escapeText(s) {
+                return String(s == null ? "" : s)
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#39;");
+            }
+
+            let similarRunning = false;
+            async function runSimilarSearch(bypassCache) {
+                if (similarRunning) return;
+                const current = similarScrapeCurrent();
+                if (!current) return;
+                const projectSlug = similarProjectSlug();
+                const cache = similarCacheLoad();
+                const sig = similarCacheSig(current);
+                if (!bypassCache) {
+                    const hit = cache[current.id];
+                    if (hit && hit.sig === sig && Array.isArray(hit.results)) {
+                        similarRenderResults(hit.results);
+                        return;
+                    }
+                }
+                similarRunning = true;
+                if (similarRefresh) similarRefresh.disabled = true;
+                similarShowStatus("Searching…", true);
+                try {
+                    const { results } = await fetchSimilarClosedTickets(current, projectSlug);
+                    cache[current.id] = { sig: sig, results: results, savedAt: Date.now() };
+                    similarCacheSave(cache);
+                    similarRenderResults(results);
+                } catch (err) {
+                    console.info("[QA Assistant] Similar closed tickets failed:", err);
+                    similarShowStatus("Couldn't reach Redmine — try Refresh.", false);
+                } finally {
+                    similarRunning = false;
+                    if (similarRefresh) similarRefresh.disabled = false;
+                }
+            }
+            if (similarRefresh) similarRefresh.addEventListener("click", () => runSimilarSearch(true));
+            if (similarWrap && isIssueDetailPage()) {
+                similarWrap.hidden = false;
+                runSimilarSearch(false);
+            }
+
             // ---- Bulk close (Agile board) ----
             // Wire the "Close multiple issues" section. All handlers are set
             // up regardless of page, but the section stays hidden unless
@@ -2314,7 +3616,7 @@ As a <role>, I want <goal> so that <benefit>.
                         bulkPopulateVersionSelect(ctx.versions);
                     })
                     .catch(err => {
-                        toast(err.message || "Couldn't load bulk-edit form");
+                        toast(err.message || "Couldn't load the Closed Version list");
                     })
                     .finally(() => { bulkCtxLoading = false; });
             }
@@ -2929,11 +4231,302 @@ As a <role>, I want <goal> so that <benefit>.
                 console.warn("[QA Assistant] Reopened button not found (#qa-show-reopened)");
             }
 
+            // ---- Sprint audit (Agile board) ----
+            const auditWrap       = panel.querySelector("#qa-audit-wrap");
+            const auditBtn        = panel.querySelector("#qa-show-audit");
+            const auditBtnLbl     = panel.querySelector("#qa-show-audit-label");
+            const auditBtnIcon    = auditBtn && auditBtn.querySelector(".qa-btn-icon");
+            const auditModal      = panel.querySelector("#qa-audit-modal");
+            const auditReport     = auditModal && auditModal.querySelector("#qa-audit-report");
+            const auditLoading    = auditModal && auditModal.querySelector("#qa-audit-loading");
+            const auditLoadTxt    = auditModal && auditModal.querySelector("#qa-audit-loading-text");
+            const auditCopy       = auditModal && auditModal.querySelector("#qa-audit-copy");
+            const auditCopyPlain  = auditModal && auditModal.querySelector("#qa-audit-copy-plain");
+            const auditToggle     = auditModal && auditModal.querySelector("#qa-audit-show-assignees");
+            const auditToggleWrap = auditModal && auditModal.querySelector("#qa-audit-toggle-wrap");
+
+            // Detach so it can cover the whole viewport (same trick as bulk / reopened).
+            if (auditModal) document.body.appendChild(auditModal);
+
+            let auditLastResult  = null;
+            let auditLastVersion = "";
+            let auditRunning     = false;
+
+            // Per-board cache so re-clicking on the same sprint returns instantly
+            // when the previous scan finished cleanly. Partial results aren't
+            // cached — the next click restarts the scan.
+            const auditCache = new Map();
+            const auditCacheKey = (s) => (s && s.projectSlug || "") + "|" + (s && s.versionId || "");
+            window.addEventListener("popstate",   () => auditCache.clear());
+            window.addEventListener("hashchange", () => auditCache.clear());
+
+            function closeAuditModal() {
+                if (!auditModal) return;
+                auditModal.classList.remove("qa-modal-open");
+                setTimeout(() => { auditModal.hidden = true; }, 180);
+            }
+
+            // Prepare and reveal the audit modal. Called only once the scan
+            // has finished (clean or partial) — the "no modal until we have
+            // data" pattern mirrors the Reopened-issues flow.
+            function openAuditModal() {
+                if (!auditModal) return;
+                auditModal.className = "qa-modal-overlay";
+                if (panel.classList.contains("qa-dark")) auditModal.classList.add("qa-dark");
+                Array.from(panel.classList).forEach(c => {
+                    if (c.indexOf("qa-accent-") === 0) auditModal.classList.add(c);
+                });
+                if (auditReport)     { auditReport.hidden = true; auditReport.innerHTML = ""; }
+                if (auditLoading)    auditLoading.hidden = true;
+                if (auditCopy)       { auditCopy.hidden = true; auditCopy.disabled = true; }
+                if (auditCopyPlain)  { auditCopyPlain.hidden = true; auditCopyPlain.disabled = true; }
+                if (auditToggleWrap) auditToggleWrap.hidden = true;
+                if (auditToggle)     auditToggle.checked = false;
+                auditModal.hidden = false;
+                requestAnimationFrame(() => auditModal.classList.add("qa-modal-open"));
+            }
+
+            function renderAuditReport() {
+                if (!auditReport || !auditLastResult) return;
+                const a = auditLastResult;
+                const showA = !!(auditToggle && auditToggle.checked);
+                const esc = (s) => String(s || "")
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;");
+                // Truncates long id lists to `cap` and appends a "see all N"
+                // button; full markup is stashed in `seeMoreStore` and swapped
+                // in by the delegated click handler below.
+                const seeMoreStore = {};
+                let seeMoreCounter = 0;
+                const linkify = (arr) => arr.map(r =>
+                    '<a href="/issues/' + r.id + '" target="_blank" rel="noopener">#' + r.id + '</a>'
+                ).join(', ');
+                const idLinks = (rows, cap) => {
+                    if (rows.length <= cap) return linkify(rows);
+                    const gid = "g" + (seeMoreCounter++);
+                    seeMoreStore[gid] = linkify(rows);
+                    return linkify(rows.slice(0, cap)) +
+                        ', <button type="button" class="qa-audit-see-more" data-group="' + gid + '">see all ' + rows.length + '</button>';
+                };
+
+                let html = '';
+                if (a.partial) {
+                    html += '<div class="qa-audit-partial-banner" role="alert">';
+                    html += '<strong>⚠ Partial results.</strong> The journal scan hit its 4-minute cap before every ticket was checked, so <em>Reopens</em> and <em>Churn</em> counts below may undercount. ';
+                    html += 'Next steps: click <strong>Audit this sprint</strong> again to resume from where it stopped, or narrow the board (e.g. by tracker or assignee) before re-auditing.';
+                    html += '</div>';
+                }
+                const nB = a.verdict.blockers.length;
+                const nW = a.verdict.warnings.length;
+                const shippable = nB === 0;
+                html += '<section class="qa-audit-section qa-audit-verdict">';
+                html += '<h3>Verdict</h3>';
+                html += '<p class="qa-audit-verdict-line qa-audit-verdict-' + (shippable ? 'yes' : 'no') + '">';
+                html += 'Ready to ship: <strong>' + (shippable ? 'YES' : 'NO') + '</strong> — ';
+                html += nB + ' blocker' + (nB === 1 ? '' : 's') + ', ';
+                html += nW + ' warning' + (nW === 1 ? '' : 's') + '.';
+                html += '</p>';
+                if (nB || nW) {
+                    html += '<ul class="qa-audit-verdict-list">';
+                    a.verdict.blockers.forEach(b => {
+                        html += '<li class="qa-audit-blocker">❌ ' + esc(b.label);
+                        if (b.rows.length) html += ' <span class="qa-audit-ids">' + idLinks(b.rows, 8) + '</span>';
+                        html += '</li>';
+                    });
+                    a.verdict.warnings.forEach(w => {
+                        html += '<li class="qa-audit-warning">⚠ ' + esc(w.label);
+                        if (w.rows.length) html += ' <span class="qa-audit-ids">' + idLinks(w.rows, 8) + '</span>';
+                        html += '</li>';
+                    });
+                    html += '</ul>';
+                }
+                html += '</section>';
+
+                html += '<section class="qa-audit-section"><h3>Overview</h3>';
+                html += '<p>Total: <strong>' + a.overview.total + '</strong> · ';
+                html += 'Closed: <strong>' + a.overview.closed + '</strong> (' + a.overview.closedPct + '%) · ';
+                html += 'Open: <strong>' + a.overview.open + '</strong></p>';
+                html += '</section>';
+
+                if (a.byTracker.length) {
+                    html += '<section class="qa-audit-section"><h3>Volume by tracker</h3>';
+                    html += '<table class="qa-audit-table"><thead><tr><th>Tracker</th><th>Total</th><th>Closed</th><th>Open</th></tr></thead><tbody>';
+                    a.byTracker.forEach(b => {
+                        html += '<tr><td>' + esc(b.name) + '</td><td>' + b.total + '</td><td>' + b.closed + '</td><td>' + b.open + '</td></tr>';
+                    });
+                    html += '</tbody></table></section>';
+                }
+
+                if (a.untriaged.length) {
+                    html += '<section class="qa-audit-section"><h3>Untriaged: ' + a.untriaged.length + ' ticket' + (a.untriaged.length === 1 ? '' : 's') + '</h3>';
+                    html += '<ul class="qa-audit-list">';
+                    a.untriaged.forEach(u => {
+                        html += '<li><a href="/issues/' + u.id + '" target="_blank" rel="noopener">#' + u.id + '</a> · ' + esc(u.subject || '(no subject)') + '</li>';
+                    });
+                    html += '</ul></section>';
+                }
+
+                if (a.feedback.count) {
+                    html += '<section class="qa-audit-section"><h3>Churn (Feedback bounces): ' + a.feedback.count + ' ticket' + (a.feedback.count === 1 ? '' : 's') + ' · ' + a.feedback.pct + '%';
+                    if (a.feedback.timedOut) html += ' <span class="qa-audit-partial">(partial)</span>';
+                    html += '</h3><ul class="qa-audit-list">';
+                    a.feedback.rows.forEach(r => {
+                        html += '<li><a href="/issues/' + r.id + '" target="_blank" rel="noopener">#' + r.id + '</a> · ' + esc(r.subject || '(no subject)') + '</li>';
+                    });
+                    html += '</ul></section>';
+                }
+
+                if (a.reopens.count) {
+                    html += '<section class="qa-audit-section"><h3>Reopens: ' + a.reopens.count + ' ticket' + (a.reopens.count === 1 ? '' : 's') + ' · ' + a.reopens.pct + '% (' + a.reopens.count + ' / ' + a.reopens.closedTotal + ' closed)';
+                    if (a.reopens.timedOut) html += ' <span class="qa-audit-partial">(partial)</span>';
+                    html += '</h3><ul class="qa-audit-list">';
+                    a.reopens.rows.forEach(r => {
+                        html += '<li><a href="/issues/' + r.id + '" target="_blank" rel="noopener">#' + r.id + '</a> · ' + esc(r.subject || '(no subject)') + '</li>';
+                    });
+                    html += '</ul></section>';
+                }
+
+                if (showA && a.assignees.closedBy.length) {
+                    html += '<section class="qa-audit-section"><h3>Closed by assignee</h3>';
+                    html += '<p class="qa-audit-tally">' + a.assignees.closedBy.map(x => esc(x.name) + ' <strong>' + x.count + '</strong>').join(' · ') + '</p>';
+                    html += '</section>';
+                }
+                if (showA && a.assignees.reopensAgainst.length) {
+                    html += '<section class="qa-audit-section"><h3>Reopens against</h3>';
+                    html += '<p class="qa-audit-tally">' + a.assignees.reopensAgainst.map(x => esc(x.name) + ' <strong>' + x.count + '</strong>').join(' · ') + '</p>';
+                    html += '</section>';
+                }
+
+                auditReport.innerHTML = html;
+                auditReport._seeMoreStore = seeMoreStore;
+                if (!auditReport._seeMoreWired) {
+                    auditReport.addEventListener("click", (ev) => {
+                        const btn = ev.target && ev.target.closest && ev.target.closest(".qa-audit-see-more");
+                        if (!btn) return;
+                        ev.preventDefault();
+                        const gid  = btn.getAttribute("data-group");
+                        const full = auditReport._seeMoreStore && auditReport._seeMoreStore[gid];
+                        if (!full) return;
+                        const idsSpan = btn.closest(".qa-audit-ids");
+                        if (idsSpan) idsSpan.innerHTML = full;
+                    });
+                    auditReport._seeMoreWired = true;
+                }
+                auditReport.hidden = false;
+                if (auditLoading) auditLoading.hidden = true;
+                if (auditCopy) { auditCopy.hidden = false; auditCopy.disabled = false; }
+                if (auditCopyPlain) { auditCopyPlain.hidden = false; auditCopyPlain.disabled = false; }
+                if (auditToggleWrap) auditToggleWrap.hidden = false;
+            }
+
+            if (auditModal) {
+                auditModal.addEventListener("click", (e) => {
+                    if (e.target === auditModal) closeAuditModal();
+                });
+                auditModal.querySelectorAll('[data-action="audit-close"]').forEach(b =>
+                    b.addEventListener("click", (e) => { e.stopPropagation(); closeAuditModal(); }));
+                if (auditToggle) auditToggle.addEventListener("change", () => renderAuditReport());
+                if (auditCopy) auditCopy.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    if (!auditLastResult) return;
+                    try {
+                        const md = renderSprintAuditMarkdown(auditLastResult, auditLastVersion, !!(auditToggle && auditToggle.checked));
+                        await navigator.clipboard.writeText(md);
+                        toast("Report copied to clipboard");
+                    } catch (err) {
+                        console.error("[QA Assistant] Audit copy failed:", err);
+                        toast("Copy failed: " + (err && err.message ? err.message : "unknown"));
+                    }
+                });
+                if (auditCopyPlain) auditCopyPlain.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    if (!auditLastResult) return;
+                    try {
+                        const txt = renderSprintAuditPlain(auditLastResult, auditLastVersion, !!(auditToggle && auditToggle.checked));
+                        await navigator.clipboard.writeText(txt);
+                        toast("Plain-text report copied to clipboard");
+                    } catch (err) {
+                        console.error("[QA Assistant] Audit plain copy failed:", err);
+                        toast("Copy failed: " + (err && err.message ? err.message : "unknown"));
+                    }
+                });
+            }
+
+            if (auditBtn) {
+                console.info("[QA Assistant] Sprint audit button wired");
+                auditBtn.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    if (auditRunning) return;
+                    const scope = getCurrentBoardScope();
+                    if (!scope) { toast("Open an Agile board first."); return; }
+
+                    // Version label — pulled from the board page's h2 header.
+                    let versionLabel = "";
+                    const boardHdr = document.querySelector("#content h2");
+                    if (boardHdr) versionLabel = boardHdr.textContent.trim().replace(/\s+/g, " ");
+
+                    // Instant return on clean cache hit — open the report right away.
+                    const cacheKey = auditCacheKey(scope);
+                    const cached   = auditCache.get(cacheKey);
+                    if (cached && !cached.partial) {
+                        console.info("[QA Assistant] Audit cache hit for", cacheKey);
+                        auditLastResult  = cached;
+                        auditLastVersion = versionLabel;
+                        openAuditModal();
+                        renderAuditReport();
+                        return;
+                    }
+
+                    // Otherwise: run (or resume) the scan WITHOUT opening the
+                    // modal. Progress lives on the button label, same pattern
+                    // as the Reopened-issues button. Modal opens only after
+                    // runSprintAudit resolves with clean or partial data.
+                    auditRunning = true;
+                    const isResume = !!(cached && cached.partial && cached.resumeState);
+                    if (isResume) console.info("[QA Assistant] Resuming audit from partial cache");
+                    const originalLabel = auditBtnLbl ? auditBtnLbl.textContent : "";
+                    auditBtn.disabled = true;
+                    auditBtn.classList.add("qa-loading");
+                    if (auditBtnIcon) auditBtnIcon.innerHTML = svgIcon("rotate-ccw");
+                    if (auditBtnLbl) auditBtnLbl.textContent = isResume ? "Resuming…" : "Auditing…";
+
+                    try {
+                        const result = await runSprintAudit({
+                            projectSlug: scope.projectSlug,
+                            versionId:   scope.versionId,
+                            prevPartial: isResume ? cached : null,
+                            onProgress: (phase, done, total) => {
+                                if (!auditBtnLbl) return;
+                                auditBtnLbl.textContent = total > 0
+                                    ? (phase + " (" + done + "/" + total + ")")
+                                    : phase;
+                            }
+                        });
+                        auditCache.set(cacheKey, result);
+                        auditLastResult  = result;
+                        auditLastVersion = versionLabel;
+                        openAuditModal();
+                        renderAuditReport();
+                    } catch (err) {
+                        console.error("[QA Assistant] Sprint audit failed:", err);
+                        toast("Audit failed: " + (err && err.message ? err.message : "unknown"));
+                    } finally {
+                        auditRunning = false;
+                        auditBtn.disabled = false;
+                        auditBtn.classList.remove("qa-loading");
+                        if (auditBtnIcon) auditBtnIcon.innerHTML = svgIcon("check-square");
+                        if (auditBtnLbl) auditBtnLbl.textContent = originalLabel || "Audit this sprint";
+                    }
+                });
+            }
+
             // Only reveal on Agile board pages — everywhere else the section
             // makes no sense (no cards to select).
             if (isAgileBoardPage()) {
                 bulkWrap.hidden = false;
                 if (reopenedWrap) reopenedWrap.hidden = false;
+                if (auditWrap)    auditWrap.hidden = false;
             }
         }
 
@@ -3717,6 +5310,61 @@ As a <role>, I want <goal> so that <benefit>.
     }
 
     //////////////////////////////////////////////////////
+    // Issue-header copy button (issue detail page)
+    //////////////////////////////////////////////////////
+
+    // Injects a small copy button next to the "Bug #NNNN" h2 on issue detail
+    // pages. Clipboard receives Markdown: bolded tracker+id, subject, then the
+    // canonical issue URL on the next line.
+    function mountIssueLinkCopyButton() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        const h2 = document.querySelector("#content h2");
+        if (!h2 || h2.dataset.qaCopy === "1") return;
+        const header = (h2.textContent || "").trim().replace(/\s+/g, " ");
+        const idMatch = location.pathname.match(/\/issues\/(\d+)/);
+        if (!header || !idMatch) return;
+        h2.dataset.qaCopy = "1";
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "qa-issue-copy-btn";
+        btn.title = "Copy issue title and link";
+        btn.setAttribute("aria-label", "Copy issue title and link");
+        btn.innerHTML = svgIcon("copy");
+        h2.appendChild(document.createTextNode(" "));
+        h2.appendChild(btn);
+
+        btn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const subjEl = document.querySelector(".subject h3, .subject > div > h3");
+            const subject = subjEl ? subjEl.textContent.trim().replace(/\s+/g, " ") : "";
+            const url = REDMINE + "/issues/" + idMatch[1];
+            const payload = subject
+                ? "*" + header + "* : " + subject + "\n" + url
+                : "*" + header + "*\n" + url;
+            try {
+                await navigator.clipboard.writeText(payload);
+                toast("Issue copied to clipboard");
+            } catch (_) {
+                toast("Copy failed — clipboard blocked");
+            }
+        });
+    }
+
+    // Some themes rerender the h2 late; a light observer re-mounts if needed.
+    function observeIssueHeader() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        mountIssueLinkCopyButton();
+        const root = document.getElementById("content") || document.body;
+        if (!root) return;
+        const mo = new MutationObserver(() => mountIssueLinkCopyButton());
+        mo.observe(root, { childList: true, subtree: true });
+    }
+
+    //////////////////////////////////////////////////////
     // Bootstrap
     //////////////////////////////////////////////////////
 
@@ -3768,6 +5416,7 @@ As a <role>, I want <goal> so that <benefit>.
         autoFillIfNeeded();
         rememberCurrentBoard();
         observeChecklistSection();
+        observeIssueHeader();
     }
 
     // The content script runs at document_idle, but guard against both timings.

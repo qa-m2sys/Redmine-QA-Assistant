@@ -58,6 +58,29 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
 - **Clear** — clear the subject + description fields in one click.
 - **Toast notifications** confirm every action.
 
+### 🧠 Analyze Ticket (AI)
+- On any issue detail page (`/issues/<n>`), the panel gains an **"Analyze Ticket"** section with a single **Analyze this ticket** button.
+- One click scrapes the whole ticket — subject, tracker, status, priority, assignee, target version, description, every checklist item (with tick state) and the last few journal comments — and asks the AI for a QA-friendly walk-through.
+- The report opens in a themed modal, written in a warm human tone, split into fixed sections:
+  - **Ticket summary**
+  - **What changes are being requested**
+  - **What to expect after the change**
+  - **Questions worth asking**
+  - **Edge cases**
+  - **Suggested test cases**
+  - **Risks / regression areas**
+  - **Assumptions the AI made**
+- Sections that genuinely don't apply are omitted rather than padded.
+- **Copy** button grabs the raw Markdown so you can paste it into Slack, a test-plan doc, or a Redmine comment.
+- Reuses your saved OpenAI key and the model you already picked — no new setup.
+
+### 🔎 Similar closed tickets
+- On any issue detail page (`/issues/<n>`), the panel gains a **"Similar closed tickets"** section that auto-populates on load.
+- Scans the project's already-closed tickets whose subject overlaps the current one — up to 5 results, ranked client-side by keyword Jaccard overlap with a same-tracker bonus.
+- Each row shows `#id · Tracker · match%`, a 2-line subject, and the closed version (e.g. *Closed in v9.4.0*), opening in a new tab so your current ticket stays put.
+- Results are cached per issue in `localStorage` and signed by `subject|tracker`, so a rename auto-invalidates the cache. **Refresh** re-runs the search bypassing the cache.
+- Test Case tickets are excluded from the results.
+
 ### ✅ Close an issue in one click
 - New **"Close this issue"** section that appears on any Redmine issue detail page (`/issues/<n>`).
 - Pick the **Closed Version** from a dropdown that mirrors Redmine's own list (custom field #12), and the panel writes:
@@ -157,6 +180,15 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a full history of what changed in e
   OpenAI API key, stored locally in the browser.
 - **Copy Description** — Copies the current template text to the clipboard.
 - **Clear Form** — Clears the subject and description fields in one click.
+- **Similar closed tickets** — On any Redmine issue detail page a new
+  *Similar closed tickets* section auto-runs on load and lists up to 5
+  already-closed tickets in the same project whose subject overlaps the
+  current one. Ranking is client-side (keyword Jaccard + same-tracker
+  bonus), each row shows `#id · Tracker · match%` + a 2-line subject +
+  the closed version, and results open in a new tab so your current
+  ticket stays put. Cached per issue and signed by `subject|tracker` so
+  a rename auto-invalidates it; a **Refresh** button re-runs the search
+  bypassing the cache. Test Case tickets are excluded.
 - **Close an issue from the panel** — On any Redmine issue detail page a new
   *Close this issue* section appears at the bottom of the panel. Pick a
   **Closed Version** from a dropdown that mirrors Redmine's own custom-field
