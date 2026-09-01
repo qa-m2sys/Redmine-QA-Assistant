@@ -1309,6 +1309,22 @@ As a <role>, I want <goal> so that <benefit>.
     // and Immediate (5). Change if this instance renumbered priorities.
     const URGENT_PRIORITY_IDS = ["4", "5"];
 
+    // QA daily counter (agile board injection). Names match Redmine author
+    // display names verbatim — rename here if a member's profile changes.
+    const QA_TEAM_MEMBERS = [
+        "Jannatut Tabassum",
+        "Muntanuz Zaman",
+        "Shishir Talha",
+        "Sharmin Akter",
+        "Sayma Tihany",
+        "Nafisa Feroz"
+    ];
+    const QA_DAILY_START_HOUR   = 10;
+    const QA_DAILY_CACHE_KEY    = "qa.dailyReport.v1";
+    const QA_DAILY_CACHE_TTL_MS = 5 * 60 * 1000;
+    const QA_DAILY_WEEK_CACHE_KEY    = "qa.dailyReport.week.v1";
+    const QA_DAILY_WEEK_CACHE_TTL_MS = 30 * 60 * 1000;
+
     // Extract { projectSlug, versionId } from the current agile board URL.
     // The pathname carries the project (`/projects/<slug>/agile/board/…`)
     // and the query string carries `v[fixed_version_id][]=<id>` when the
@@ -1635,12 +1651,13 @@ As a <role>, I want <goal> so that <benefit>.
     // Similar closed tickets (issue detail pages)
     //////////////////////////////////////////////////////
 
-    const SIMILAR_CACHE_KEY    = "qa.similar.v1";
-    const SIMILAR_CACHE_MAX    = 500;
-    const SIMILAR_RESULT_LIMIT = 5;
-    // Empirically: 0.15 keeps sensible near-matches on 3-4 word subjects
-    // while filtering out one-token coincidences ("login" alone etc.).
-    const SIMILAR_MIN_SCORE    = 0.15;
+    const SIMILAR_CACHE_KEY       = "qa.similar.v1";
+    const SIMILAR_CACHE_MAX       = 500;
+    const SIMILAR_RESULT_LIMIT    = 10;
+    const SIMILAR_INITIAL_VISIBLE = 5;
+    // Empirically: 0.10 catches partial reworded matches while still filtering
+    // one-token coincidences ("login" alone etc.).
+    const SIMILAR_MIN_SCORE       = 0.10;
 
     // Kept small on purpose — over-filtering costs legitimate keywords.
     const SIMILAR_STOPWORDS = new Set([
@@ -1671,10 +1688,10 @@ As a <role>, I want <goal> so that <benefit>.
 
     // Redmine's subject filter is substring-only. Passing multiple values
     // as separate `v[subject][]` entries OR's them (`LIKE '%a%' OR LIKE '%b%' …`),
-    // so we hand it the top ~3 most discriminative (longest) tokens and let
+    // so we hand it the top ~5 most discriminative (longest) tokens and let
     // the client re-rank the OR'd result set.
     function similarKeywords(tokens) {
-        return tokens.slice().sort((a, b) => b.length - a.length).slice(0, 3);
+        return tokens.slice().sort((a, b) => b.length - a.length).slice(0, 5);
     }
 
     function similarJaccard(a, b) {
@@ -1747,7 +1764,7 @@ As a <role>, I want <goal> so that <benefit>.
         params.append("c[]", "updated_on");
         params.append("c[]", "cf_" + CLOSED_VERSION_CF_ID);
         params.append("sort", "updated_on:desc");
-        params.append("per_page", "40");
+        params.append("per_page", "80");
 
         const url = basePath + "?" + params.toString();
         console.info("[QA Assistant] Similar closed tickets — GET", url);
@@ -2632,6 +2649,7 @@ As a <role>, I want <goal> so that <benefit>.
                     <ul class="qa-similar-list" id="qa-similar-list" hidden></ul>
                     <div class="qa-similar-empty" id="qa-similar-empty" hidden>No similar closed tickets found in this project.</div>
                     <div class="qa-similar-actions">
+                        <button class="qa-btn qa-tmpl-btn" data-action="similar-more" id="qa-similar-more" type="button" hidden><span class="qa-btn-icon">${svgIcon("chevron-right")}</span><span class="qa-btn-label" id="qa-similar-more-label">See more</span></button>
                         <button class="qa-btn qa-tmpl-btn" data-action="similar-refresh" id="qa-similar-refresh" type="button" title="Search again (bypass cache)"><span class="qa-btn-icon">${svgIcon("rotate-ccw")}</span><span class="qa-btn-label">Refresh</span></button>
                     </div>
                 </div>` : "";
@@ -3319,6 +3337,8 @@ As a <role>, I want <goal> so that <benefit>.
             const similarList      = panel.querySelector("#qa-similar-list");
             const similarEmpty     = panel.querySelector("#qa-similar-empty");
             const similarRefresh   = panel.querySelector("#qa-similar-refresh");
+            const similarMore      = panel.querySelector("#qa-similar-more");
+            const similarMoreLbl   = panel.querySelector("#qa-similar-more-label");
 
             function similarShowStatus(text, spinner) {
                 if (!similarStatus) return;
@@ -3339,13 +3359,15 @@ As a <role>, I want <goal> so that <benefit>.
                 if (!results || !results.length) { similarShowEmpty(); return; }
                 if (similarStatus) similarStatus.hidden = true;
                 if (similarEmpty)  similarEmpty.hidden  = true;
-                similarList.innerHTML = results.map(r => {
+                similarList.classList.remove("qa-similar-expanded");
+                similarList.innerHTML = results.map((r, i) => {
                     const pct = Math.round(r.score * 100);
                     const trackerCls = "qa-similar-badge qa-similar-tracker-" + String(r.tracker || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
                     const href = REDMINE + "/issues/" + r.id;
                     const meta = r.closedVersion ? ("Closed in " + escapeText(r.closedVersion)) : "Closed";
+                    const extraCls = i >= SIMILAR_INITIAL_VISIBLE ? " qa-similar-item-extra" : "";
                     return `
-                        <li class="qa-similar-item">
+                        <li class="qa-similar-item${extraCls}">
                             <a href="${href}" target="_blank" rel="noopener" title="${escapeText(r.subject)}">
                                 <span class="qa-similar-row-top">
                                     <span class="qa-similar-id">#${escapeText(r.id)}</span>
@@ -3358,6 +3380,12 @@ As a <role>, I want <goal> so that <benefit>.
                         </li>`;
                 }).join("");
                 similarList.hidden = false;
+
+                const extras = Math.max(0, results.length - SIMILAR_INITIAL_VISIBLE);
+                if (similarMore) {
+                    similarMore.hidden = extras === 0;
+                    if (similarMoreLbl) similarMoreLbl.textContent = extras ? ("See more (" + extras + ")") : "See more";
+                }
             }
 
             // Small local HTML-escaper — model output goes into innerHTML.
@@ -3402,6 +3430,11 @@ As a <role>, I want <goal> so that <benefit>.
                 }
             }
             if (similarRefresh) similarRefresh.addEventListener("click", () => runSimilarSearch(true));
+            if (similarMore) similarMore.addEventListener("click", () => {
+                const expanded = similarList.classList.toggle("qa-similar-expanded");
+                const extras = similarList.querySelectorAll(".qa-similar-item-extra").length;
+                if (similarMoreLbl) similarMoreLbl.textContent = expanded ? "See fewer" : ("See more (" + extras + ")");
+            });
             if (similarWrap && isIssueDetailPage()) {
                 similarWrap.hidden = false;
                 runSimilarSearch(false);
@@ -5365,6 +5398,556 @@ As a <role>, I want <goal> so that <benefit>.
     }
 
     //////////////////////////////////////////////////////
+    // QA Daily Report (Agile board)
+    //////////////////////////////////////////////////////
+
+    // Start of the current 10:00 window — today 10:00 if now >= 10:00, else
+    // yesterday 10:00. Local browser timezone.
+    function qaDailyWindowStart() {
+        const now = new Date();
+        const s = new Date(now.getFullYear(), now.getMonth(), now.getDate(), QA_DAILY_START_HOUR, 0, 0, 0);
+        if (now < s) s.setDate(s.getDate() - 1);
+        return s;
+    }
+
+    // Next 10:00 boundary AFTER `now`. Powers the auto-refresh timer.
+    function qaDailyNextWindowStart() {
+        const now = new Date();
+        const s = new Date(now.getFullYear(), now.getMonth(), now.getDate(), QA_DAILY_START_HOUR, 0, 0, 0);
+        if (now >= s) s.setDate(s.getDate() + 1);
+        return s;
+    }
+
+    function qaDailyWindowLabel(d) {
+        const dow = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
+        const hh  = String(d.getHours()).padStart(2, "0");
+        const mm  = String(d.getMinutes()).padStart(2, "0");
+        return dow + " " + hh + ":" + mm;
+    }
+
+    function qaDailyYmd(d) {
+        return d.getFullYear() + "-"
+            + String(d.getMonth() + 1).padStart(2, "0") + "-"
+            + String(d.getDate()).padStart(2, "0");
+    }
+
+    // Redmine renders "Logged in as <a>Full Name</a>" in a #loggedas div; we
+    // just need the display name to match against QA_TEAM_MEMBERS.
+    function qaDetectCurrentUser() {
+        const a = document.querySelector("#loggedas a, div.loggedas a");
+        if (!a) return null;
+        return { name: a.textContent.trim().replace(/\s+/g, " ") };
+    }
+
+    function qaDailyMemberFilterUrl(authorId, windowStart) {
+        const p = new URLSearchParams();
+        p.append("set_filter", "1");
+        p.append("f[]", "author_id");
+        p.append("op[author_id]", "=");
+        p.append("v[author_id][]", String(authorId));
+        p.append("f[]", "created_on");
+        p.append("op[created_on]", ">=");
+        p.append("v[created_on][]", qaDailyYmd(windowStart));
+        p.append("f[]", "status_id");
+        p.append("op[status_id]", "*");
+        p.append("sort", "created_on:desc");
+        return "/issues?" + p.toString();
+    }
+
+    // Pull >= start-day HTML pages, walk `tr[id^='issue-']` rows.
+    async function qaFetchIssueRows(startDate) {
+        const rows = [];
+        const dateStr = qaDailyYmd(startDate);
+        const MAX_PAGES = 15;
+        for (let page = 1; page <= MAX_PAGES; page++) {
+            const params = new URLSearchParams();
+            params.append("set_filter", "1");
+            params.append("f[]", "created_on");
+            params.append("op[created_on]", ">=");
+            params.append("v[created_on][]", dateStr);
+            params.append("f[]", "status_id");
+            params.append("op[status_id]", "*");
+            params.append("c[]", "author");
+            params.append("c[]", "tracker");
+            params.append("c[]", "status");
+            params.append("c[]", "subject");
+            params.append("c[]", "created_on");
+            params.append("sort", "created_on:desc");
+            params.append("per_page", "100");
+            params.append("page", String(page));
+
+            const res = await fetch("/issues?" + params.toString(), { credentials: "include", headers: { "Accept": "text/html" } });
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+            const trs = doc.querySelectorAll("tr[id^='issue-']");
+            if (!trs.length) break;
+            trs.forEach(tr => {
+                const idM = tr.id.match(/^issue-(\d+)$/);
+                if (!idM) return;
+                const authorA = tr.querySelector("td.author a");
+                const authorName = authorA ? authorA.textContent.trim().replace(/\s+/g, " ") : "";
+                const authorHref = authorA ? (authorA.getAttribute("href") || "") : "";
+                const authorIdM  = authorHref.match(/\/users\/(\d+)/);
+                const timeEl = tr.querySelector("td.created_on time");
+                const createdOn = timeEl && timeEl.getAttribute("datetime")
+                    ? timeEl.getAttribute("datetime")
+                    : ((tr.querySelector("td.created_on") || {}).textContent || "").trim();
+                const subject = ((tr.querySelector("td.subject") || {}).textContent || "").trim();
+                const tracker = ((tr.querySelector("td.tracker") || {}).textContent || "").trim();
+                const status  = ((tr.querySelector("td.status")  || {}).textContent || "").trim();
+                rows.push({
+                    id: idM[1],
+                    authorName: authorName,
+                    authorId: authorIdM ? authorIdM[1] : null,
+                    tracker: tracker,
+                    status: status,
+                    subject: subject,
+                    createdOn: createdOn
+                });
+            });
+            if (trs.length < 100) break;
+        }
+        return rows;
+    }
+
+    async function fetchQaDailyReport(windowStart) {
+        const rows = await qaFetchIssueRows(windowStart);
+        const qaSet   = new Set(QA_TEAM_MEMBERS);
+        const startMs = windowStart.getTime();
+        const byAuthor = {};
+        const trackersTotal = {};
+        QA_TEAM_MEMBERS.forEach(n => byAuthor[n] = { count: 0, trackers: {}, authorId: null, issues: [] });
+
+        let total = 0;
+        rows.forEach(r => {
+            if (!qaSet.has(r.authorName)) return;
+            if (String(r.tracker).toLowerCase() === "test case") return;
+            const t = r.createdOn ? new Date(r.createdOn).getTime() : NaN;
+            if (!isFinite(t) || t < startMs) return;
+            const b = byAuthor[r.authorName];
+            b.count++;
+            if (r.authorId && !b.authorId) b.authorId = r.authorId;
+            b.trackers[r.tracker] = (b.trackers[r.tracker] || 0) + 1;
+            b.issues.push({ id: r.id, subject: r.subject, tracker: r.tracker, status: r.status, createdOn: r.createdOn });
+            trackersTotal[r.tracker] = (trackersTotal[r.tracker] || 0) + 1;
+            total++;
+        });
+
+        return {
+            total: total,
+            byAuthor: byAuthor,
+            trackersTotal: trackersTotal,
+            windowStartISO: windowStart.toISOString(),
+            fetchedAt: Date.now()
+        };
+    }
+
+    // 7-day breakdown for the weekly leaderboard modal. Single fetch starting
+    // 6 windows ago; client-side bucket by day.
+    async function fetchQaWeeklyReport(windowStart) {
+        const weekStart = new Date(windowStart.getTime());
+        weekStart.setDate(weekStart.getDate() - 6);
+
+        const rows = await qaFetchIssueRows(weekStart);
+        const qaSet = new Set(QA_TEAM_MEMBERS);
+
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+            const s = new Date(weekStart.getTime());
+            s.setDate(s.getDate() + i);
+            days.push({ start: s, ymd: qaDailyYmd(s), dow: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][s.getDay()] });
+        }
+
+        const byAuthor = {};
+        QA_TEAM_MEMBERS.forEach(n => byAuthor[n] = { daily: new Array(7).fill(0), total: 0 });
+
+        rows.forEach(r => {
+            if (!qaSet.has(r.authorName)) return;
+            if (String(r.tracker).toLowerCase() === "test case") return;
+            const t = r.createdOn ? new Date(r.createdOn).getTime() : NaN;
+            if (!isFinite(t)) return;
+            for (let i = 6; i >= 0; i--) {
+                const dayStart = days[i].start.getTime();
+                const dayEnd = i === 6 ? Infinity : days[i + 1].start.getTime();
+                if (t >= dayStart && t < dayEnd) {
+                    byAuthor[r.authorName].daily[i]++;
+                    byAuthor[r.authorName].total++;
+                    break;
+                }
+            }
+        });
+
+        return {
+            days: days.map(d => ({ ymd: d.ymd, dow: d.dow })),
+            byAuthor: byAuthor,
+            windowStartISO: windowStart.toISOString(),
+            fetchedAt: Date.now()
+        };
+    }
+
+    function qaDailyCacheLoad() {
+        try { const raw = localStorage.getItem(QA_DAILY_CACHE_KEY); return raw ? JSON.parse(raw) : null; }
+        catch (_) { return null; }
+    }
+    function qaDailyCacheSave(entry) {
+        try { localStorage.setItem(QA_DAILY_CACHE_KEY, JSON.stringify(entry)); } catch (_) { /* quota */ }
+    }
+    function qaDailyWeekCacheLoad() {
+        try { const raw = localStorage.getItem(QA_DAILY_WEEK_CACHE_KEY); return raw ? JSON.parse(raw) : null; }
+        catch (_) { return null; }
+    }
+    function qaDailyWeekCacheSave(entry) {
+        try { localStorage.setItem(QA_DAILY_WEEK_CACHE_KEY, JSON.stringify(entry)); } catch (_) { /* quota */ }
+    }
+
+    // Auto-refresh handle — cleared before every re-arm so timers can't stack.
+    let qaDailyRefreshTimer = null;
+    function qaDailyScheduleAutoRefresh() {
+        if (qaDailyRefreshTimer) { clearTimeout(qaDailyRefreshTimer); qaDailyRefreshTimer = null; }
+        const next = qaDailyNextWindowStart();
+        const delay = next.getTime() - Date.now();
+        if (delay <= 0 || delay > 24 * 60 * 60 * 1000) return;
+        qaDailyRefreshTimer = setTimeout(() => {
+            qaDailyRefreshTimer = null;
+            if (document.getElementById("qa-board-daily")) runQaDailyReport(true);
+        }, delay + 5000);
+    }
+
+    // Idempotent — safe to call from a MutationObserver on every #content mutation.
+    function mountBoardDailyReport() {
+        if (location.origin !== REDMINE) return;
+        if (!isAgileBoardPage()) return;
+        if (document.getElementById("qa-board-daily")) return;
+        const anchor = document.querySelector("#content h2");
+        if (!anchor || !anchor.parentNode) return;
+
+        const wrap = document.createElement("div");
+        wrap.id = "qa-board-daily";
+        wrap.className = "qa-board-daily";
+        wrap.innerHTML = ''
+            + '<div class="qa-board-daily-top">'
+            +   '<button type="button" class="qa-board-daily-title" id="qa-board-daily-title" title="Open weekly leaderboard">QA today</button>'
+            +   '<span class="qa-board-daily-sep">·</span>'
+            +   '<span class="qa-board-daily-window" id="qa-board-daily-window">…</span>'
+            +   '<span class="qa-board-daily-sep">·</span>'
+            +   '<span class="qa-board-daily-total" id="qa-board-daily-total-pill"><strong id="qa-board-daily-total">0</strong> total</span>'
+            +   '<button type="button" class="qa-board-daily-copy" id="qa-board-daily-copy" title="Copy summary for standup" aria-label="Copy summary">📋</button>'
+            +   '<button type="button" class="qa-board-daily-refresh" id="qa-board-daily-refresh" title="Refresh (bypass cache)" aria-label="Refresh">↻</button>'
+            + '</div>'
+            + '<div class="qa-board-daily-chips" id="qa-board-daily-chips"></div>';
+        anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+
+        wrap.querySelector("#qa-board-daily-refresh").addEventListener("click", (e) => {
+            e.preventDefault();
+            runQaDailyReport(true);
+        });
+        wrap.querySelector("#qa-board-daily-copy").addEventListener("click", async (e) => {
+            e.preventDefault();
+            const data = qaDailyCacheLoad();
+            if (!data) { toast("Report not loaded yet"); return; }
+            const start = qaDailyWindowStart();
+            const first = (n) => n.split(/\s+/)[0] || n;
+            const chunks = QA_TEAM_MEMBERS
+                .map(n => ({ n, c: (data.byAuthor && data.byAuthor[n] ? data.byAuthor[n].count : 0) }))
+                .sort((a, b) => b.c - a.c)
+                .map(x => first(x.n) + " " + x.c);
+            const line = "QA today (since " + qaDailyWindowLabel(start) + "): "
+                + data.total + " total — " + chunks.join(", ");
+            try { await navigator.clipboard.writeText(line); toast("Summary copied"); }
+            catch (_) { toast("Copy failed — clipboard blocked"); }
+        });
+        wrap.querySelector("#qa-board-daily-title").addEventListener("click", (e) => {
+            e.preventDefault();
+            openQaWeeklyLeaderboard();
+        });
+
+        renderQaDailyReportSkeleton();
+        runQaDailyReport(false);
+    }
+
+    function renderQaDailyReportSkeleton() {
+        const wrap = document.getElementById("qa-board-daily");
+        if (!wrap) return;
+        const chipsEl = wrap.querySelector("#qa-board-daily-chips");
+        if (!chipsEl) return;
+        const parts = QA_TEAM_MEMBERS.map(() => '<span class="qa-board-daily-chip qa-board-daily-chip-skel" aria-hidden="true"></span>');
+        chipsEl.innerHTML = parts.join('<span class="qa-board-daily-sep">·</span>');
+    }
+
+    async function runQaDailyReport(bypassCache) {
+        const wrap = document.getElementById("qa-board-daily");
+        if (!wrap) return;
+        const chipsEl    = wrap.querySelector("#qa-board-daily-chips");
+        const winEl      = wrap.querySelector("#qa-board-daily-window");
+        const refreshBtn = wrap.querySelector("#qa-board-daily-refresh");
+        const start = qaDailyWindowStart();
+        winEl.textContent = "since " + qaDailyWindowLabel(start);
+
+        const cache = qaDailyCacheLoad();
+        if (!bypassCache && cache && cache.windowStartISO === start.toISOString() &&
+            (Date.now() - cache.fetchedAt) < QA_DAILY_CACHE_TTL_MS) {
+            renderQaDailyReport(cache, start);
+            qaDailyScheduleAutoRefresh();
+            return;
+        }
+
+        refreshBtn.disabled = true;
+        wrap.classList.add("qa-board-daily-loading");
+        renderQaDailyReportSkeleton();
+        try {
+            const data = await fetchQaDailyReport(start);
+            qaDailyCacheSave(data);
+            renderQaDailyReport(data, start);
+        } catch (err) {
+            console.info("[QA Assistant] QA daily report failed:", err);
+            chipsEl.textContent = "Couldn't load — try Refresh.";
+        } finally {
+            refreshBtn.disabled = false;
+            wrap.classList.remove("qa-board-daily-loading");
+            qaDailyScheduleAutoRefresh();
+        }
+    }
+
+    function renderQaDailyReport(data, start) {
+        const wrap = document.getElementById("qa-board-daily");
+        if (!wrap) return;
+        const totalEl   = wrap.querySelector("#qa-board-daily-total");
+        const totalPill = wrap.querySelector("#qa-board-daily-total-pill");
+        const chipsEl   = wrap.querySelector("#qa-board-daily-chips");
+        totalEl.textContent = String(data.total);
+
+        const esc = (s) => String(s == null ? "" : s)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+        const firstName = (n) => (n.split(/\s+/)[0] || n);
+
+        const teamBreakdown = Object.entries(data.trackersTotal || {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([t, n]) => n + " " + t).join(" · ") || "no tickets in window";
+        totalPill.title = "Team breakdown: " + teamBreakdown;
+
+        if (data.total === 0) {
+            chipsEl.innerHTML = '<span class="qa-board-daily-empty">Nothing filed since ' + esc(qaDailyWindowLabel(start)) + ' — quiet morning.</span>';
+            return;
+        }
+
+        let topCount = 0;
+        QA_TEAM_MEMBERS.forEach(n => {
+            const c = (data.byAuthor[n] && data.byAuthor[n].count) || 0;
+            if (c > topCount) topCount = c;
+        });
+
+        const currentUser = qaDetectCurrentUser();
+        const currentName = currentUser ? currentUser.name : null;
+
+        const parts = QA_TEAM_MEMBERS.map(name => {
+            const b = (data.byAuthor && data.byAuthor[name]) || { count: 0, trackers: {}, authorId: null };
+            const breakdown = Object.entries(b.trackers)
+                .sort((a, b2) => b2[1] - a[1])
+                .map(([t, n]) => n + " " + t).join(" · ") || "no tickets in window";
+            const isTop = b.count > 0 && b.count === topCount;
+            const isSelf = currentName === name && b.count > 0;
+            const badge = isTop ? '<span class="qa-board-daily-crown" title="Top today">🏆</span>' : '';
+            const label = badge
+                        + '<span class="qa-board-daily-name">' + esc(firstName(name)) + '</span>'
+                        + ' <span class="qa-board-daily-count">' + b.count + '</span>';
+            if (isSelf) {
+                return '<button type="button" class="qa-board-daily-chip qa-board-daily-chip-self" data-qa-self="1" title="' + esc(name + " — " + breakdown + " · Click for details") + '">' + label + '</button>';
+            }
+            if (b.authorId && b.count > 0) {
+                const href = qaDailyMemberFilterUrl(b.authorId, start);
+                return '<a class="qa-board-daily-chip" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" title="' + esc(name + " — " + breakdown) + '">' + label + '</a>';
+            }
+            return '<span class="qa-board-daily-chip qa-board-daily-chip-empty" title="' + esc(name + " — " + breakdown) + '">' + label + '</span>';
+        });
+        chipsEl.innerHTML = parts.join('<span class="qa-board-daily-sep">·</span>');
+
+        const selfBtn = chipsEl.querySelector('[data-qa-self="1"]');
+        if (selfBtn && currentName) {
+            selfBtn.addEventListener("click", (e) => {
+                e.preventDefault();
+                openQaTesterDashboard(currentName);
+            });
+        }
+    }
+
+    //////////////////////////////////////////////////////
+    // QA Daily Report — Weekly leaderboard modal
+    //////////////////////////////////////////////////////
+
+    function openQaWeeklyLeaderboard() {
+        if (document.getElementById("qa-board-daily-week-overlay")) return;
+
+        const overlay = document.createElement("div");
+        overlay.id = "qa-board-daily-week-overlay";
+        overlay.className = "qa-board-daily-modal-overlay";
+        overlay.innerHTML = ''
+            + '<div class="qa-board-daily-modal" role="dialog" aria-labelledby="qa-board-daily-week-title">'
+            +   '<div class="qa-board-daily-modal-head">'
+            +     '<div class="qa-board-daily-modal-title" id="qa-board-daily-week-title">QA weekly leaderboard</div>'
+            +     '<button type="button" class="qa-board-daily-modal-close" aria-label="Close">×</button>'
+            +   '</div>'
+            +   '<div class="qa-board-daily-modal-body" id="qa-board-daily-week-body">Loading…</div>'
+            + '</div>';
+        document.body.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        overlay.querySelector(".qa-board-daily-modal-close").addEventListener("click", close);
+        overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+        const escHandler = (e) => { if (e.key === "Escape") { close(); document.removeEventListener("keydown", escHandler); } };
+        document.addEventListener("keydown", escHandler);
+
+        (async () => {
+            const start = qaDailyWindowStart();
+            const startISO = start.toISOString();
+            const cached = qaDailyWeekCacheLoad();
+            let data = null;
+            if (cached && cached.windowStartISO === startISO && (Date.now() - cached.fetchedAt) < QA_DAILY_WEEK_CACHE_TTL_MS) {
+                data = cached;
+            } else {
+                try {
+                    data = await fetchQaWeeklyReport(start);
+                    qaDailyWeekCacheSave(data);
+                } catch (err) {
+                    console.info("[QA Assistant] weekly leaderboard failed:", err);
+                    overlay.querySelector("#qa-board-daily-week-body").textContent = "Couldn't load weekly stats.";
+                    return;
+                }
+            }
+            renderQaWeeklyLeaderboard(data, overlay);
+        })();
+    }
+
+    function renderQaWeeklyLeaderboard(data, overlay) {
+        const body = overlay.querySelector("#qa-board-daily-week-body");
+        const esc = (s) => String(s == null ? "" : s)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+        let maxCell = 0;
+        QA_TEAM_MEMBERS.forEach(n => {
+            const row = data.byAuthor[n];
+            if (row) row.daily.forEach(v => { if (v > maxCell) maxCell = v; });
+        });
+        const intensity = (v) => (!v || !maxCell) ? 0 : Math.min(1, v / maxCell);
+
+        const header = '<tr>'
+            + '<th class="qa-board-daily-week-name">Name</th>'
+            + data.days.map(d => '<th>' + esc(d.dow) + '</th>').join('')
+            + '<th class="qa-board-daily-week-total">Total</th>'
+            + '</tr>';
+
+        const rows = QA_TEAM_MEMBERS
+            .map(n => ({ n, row: data.byAuthor[n] || { daily: new Array(7).fill(0), total: 0 } }))
+            .sort((a, b) => b.row.total - a.row.total)
+            .map(({ n, row }) => {
+                const cells = row.daily.map((v, i) => {
+                    const alpha = intensity(v);
+                    const isToday = i === 6;
+                    const style = alpha > 0
+                        ? 'background:rgba(79,140,255,' + (0.08 + alpha * 0.55).toFixed(2) + ')'
+                        : '';
+                    return '<td class="' + (isToday ? 'qa-board-daily-week-today' : '') + '" style="' + style + '">' + v + '</td>';
+                }).join('');
+                return '<tr><td class="qa-board-daily-week-name">' + esc(n) + '</td>' + cells + '<td class="qa-board-daily-week-total">' + row.total + '</td></tr>';
+            })
+            .join('');
+
+        body.innerHTML = '<table class="qa-board-daily-week-table">'
+            + '<thead>' + header + '</thead>'
+            + '<tbody>' + rows + '</tbody>'
+            + '</table>'
+            + '<div class="qa-board-daily-week-footnote">Rightmost column is the current 10:00 window. Cell shade scales to the busiest cell of the week.</div>';
+    }
+
+    //////////////////////////////////////////////////////
+    // QA Daily Report — Tester dashboard modal
+    //////////////////////////////////////////////////////
+
+    function openQaTesterDashboard(name) {
+        const data = qaDailyCacheLoad();
+        if (!data || !data.byAuthor || !data.byAuthor[name]) { toast("Report not loaded yet"); return; }
+        const existing = document.getElementById("qa-board-daily-me-overlay");
+        if (existing) existing.remove();
+
+        const esc = (s) => String(s == null ? "" : s)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+        const start = qaDailyWindowStart();
+        const bucket = data.byAuthor[name];
+        const issues = bucket.issues || [];
+        const trackerBreak = Object.entries(bucket.trackers)
+            .sort((a, b) => b[1] - a[1])
+            .map(([t, n]) => n + " " + t).join(" · ") || "no tickets";
+
+        const rowsHtml = issues.length
+            ? issues.slice()
+                .sort((a, b) => (a.createdOn < b.createdOn ? 1 : -1))
+                .map(i => ''
+                    + '<tr>'
+                    +   '<td><a href="/issues/' + esc(i.id) + '" target="_blank" rel="noopener noreferrer">#' + esc(i.id) + '</a></td>'
+                    +   '<td>' + esc(i.tracker) + '</td>'
+                    +   '<td>' + esc(i.status) + '</td>'
+                    +   '<td class="qa-board-daily-me-subject">' + esc(i.subject) + '</td>'
+                    + '</tr>'
+                ).join('')
+            : '<tr><td colspan="4" class="qa-board-daily-me-empty">No tickets filed since ' + esc(qaDailyWindowLabel(start)) + '.</td></tr>';
+
+        const overlay = document.createElement("div");
+        overlay.id = "qa-board-daily-me-overlay";
+        overlay.className = "qa-board-daily-modal-overlay";
+        overlay.innerHTML = ''
+            + '<div class="qa-board-daily-modal" role="dialog">'
+            +   '<div class="qa-board-daily-modal-head">'
+            +     '<div class="qa-board-daily-modal-title">' + esc(name) + ' — since ' + esc(qaDailyWindowLabel(start)) + '</div>'
+            +     '<button type="button" class="qa-board-daily-modal-close" aria-label="Close">×</button>'
+            +   '</div>'
+            +   '<div class="qa-board-daily-modal-body">'
+            +     '<div class="qa-board-daily-me-summary">'
+            +       '<strong>' + bucket.count + '</strong> total · ' + esc(trackerBreak)
+            +       '<button type="button" class="qa-board-daily-me-copy" id="qa-board-daily-me-copy">Copy standup summary</button>'
+            +     '</div>'
+            +     '<table class="qa-board-daily-me-table"><thead><tr>'
+            +       '<th>ID</th><th>Tracker</th><th>Status</th><th>Subject</th>'
+            +     '</tr></thead><tbody>' + rowsHtml + '</tbody></table>'
+            +   '</div>'
+            + '</div>';
+        document.body.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        overlay.querySelector(".qa-board-daily-modal-close").addEventListener("click", close);
+        overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+        const escHandler = (e) => { if (e.key === "Escape") { close(); document.removeEventListener("keydown", escHandler); } };
+        document.addEventListener("keydown", escHandler);
+
+        overlay.querySelector("#qa-board-daily-me-copy").addEventListener("click", async () => {
+            const lines = ["Standup — " + name + " (since " + qaDailyWindowLabel(start) + "):"];
+            if (!issues.length) {
+                lines.push("• no tickets filed yet");
+            } else {
+                issues.forEach(i => {
+                    lines.push("• #" + i.id + " [" + i.tracker + "] " + i.subject);
+                });
+            }
+            try { await navigator.clipboard.writeText(lines.join("\n")); toast("Summary copied"); }
+            catch (_) { toast("Copy failed — clipboard blocked"); }
+        });
+    }
+
+    // Board DOM re-renders on filter/sort changes; re-mount if the widget was
+    // ripped out. Cheap because mount() short-circuits when present.
+    function observeBoardDailyReport() {
+        if (location.origin !== REDMINE) return;
+        if (!isAgileBoardPage()) return;
+        mountBoardDailyReport();
+        const root = document.getElementById("content") || document.body;
+        if (!root) return;
+        const mo = new MutationObserver(() => mountBoardDailyReport());
+        mo.observe(root, { childList: true, subtree: true });
+    }
+
+    //////////////////////////////////////////////////////
     // Bootstrap
     //////////////////////////////////////////////////////
 
@@ -5417,6 +6000,7 @@ As a <role>, I want <goal> so that <benefit>.
         rememberCurrentBoard();
         observeChecklistSection();
         observeIssueHeader();
+        observeBoardDailyReport();
     }
 
     // The content script runs at document_idle, but guard against both timings.

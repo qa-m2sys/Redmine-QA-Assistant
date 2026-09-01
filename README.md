@@ -76,10 +76,22 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
 
 ### 🔎 Similar closed tickets
 - On any issue detail page (`/issues/<n>`), the panel gains a **"Similar closed tickets"** section that auto-populates on load.
-- Scans the project's already-closed tickets whose subject overlaps the current one — up to 5 results, ranked client-side by keyword Jaccard overlap with a same-tracker bonus.
+- Scans the project's already-closed tickets whose subject overlaps the current one — the local ranker keeps the top **10** by keyword Jaccard overlap with a same-tracker bonus.
+- The panel shows **5** by default; when more matches are available, a **See more (N)** button appears next to Refresh and toggles into *See fewer*.
 - Each row shows `#id · Tracker · match%`, a 2-line subject, and the closed version (e.g. *Closed in v9.4.0*), opening in a new tab so your current ticket stays put.
 - Results are cached per issue in `localStorage` and signed by `subject|tracker`, so a rename auto-invalidates the cache. **Refresh** re-runs the search bypassing the cache.
 - Test Case tickets are excluded from the results.
+
+### 📊 QA Daily Report on the agile board
+- Injects a compact chip strip directly under the board header on every `/projects/*/agile/board*` page, showing how many tickets each QA teammate has filed since **10:00 AM** local time (rolls to yesterday 10:00 when it's still before 10:00).
+- Each teammate's count links to Redmine's own issue list, pre-filtered to that author + window — one click to see exactly what they logged today.
+- Hover a chip for the tracker breakdown (e.g. *"Muntanuz Zaman — 5 Bug · 1 Feature"*); hover the *N total* pill for the team-wide tracker breakdown.
+- The top-scoring chip gets a 🏆, and if you're on the QA team your own chip becomes a pill button that opens a **tester dashboard** modal (table of your tickets + a *Copy standup summary* button).
+- Click the **QA today** label to open a **weekly leaderboard** modal — a 7-day heatmap of who filed what across the whole team.
+- **Copy summary** (📋) button copies a one-liner like *"QA today (since Mon 10:00): 27 total — Muntanuz 8, Jannatut 6, …"* straight to your clipboard for standup.
+- Cached in `localStorage["qa.dailyReport.v1"]` with a 5-minute TTL keyed to the current 10 AM window; weekly data has its own 30-min cache. `↻` bypasses. Widget auto-refreshes when the 10 AM window rolls over.
+- Skeleton chips animate on first load.
+- Test Case tickets are excluded from the count.
 
 ### ✅ Close an issue in one click
 - New **"Close this issue"** section that appears on any Redmine issue detail page (`/issues/<n>`).
@@ -181,14 +193,27 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a full history of what changed in e
 - **Copy Description** — Copies the current template text to the clipboard.
 - **Clear Form** — Clears the subject and description fields in one click.
 - **Similar closed tickets** — On any Redmine issue detail page a new
-  *Similar closed tickets* section auto-runs on load and lists up to 5
-  already-closed tickets in the same project whose subject overlaps the
-  current one. Ranking is client-side (keyword Jaccard + same-tracker
-  bonus), each row shows `#id · Tracker · match%` + a 2-line subject +
+  *Similar closed tickets* section auto-runs on load. Ranked client-side
+  (keyword Jaccard + same-tracker bonus) it keeps up to **10** matches
+  and shows the top **5** by default; a **See more (N)** button reveals
+  the rest. Each row shows `#id · Tracker · match%` + a 2-line subject +
   the closed version, and results open in a new tab so your current
   ticket stays put. Cached per issue and signed by `subject|tracker` so
   a rename auto-invalidates it; a **Refresh** button re-runs the search
   bypassing the cache. Test Case tickets are excluded.
+- **QA Daily Report (agile board)** — A chip strip injected under the
+  board header on `/projects/*/agile/board*` pages showing tickets
+  filed by each QA teammate since 10:00 AM local time. Each count is a
+  link to Redmine's filtered issue list for that author + window;
+  hover a chip for the tracker breakdown or the *total* pill for the
+  team-wide breakdown. The top counter gets a 🏆; empty windows show
+  a *"quiet morning"* message. Click **QA today** for a 7-day heatmap
+  leaderboard modal; click your own chip for a personal dashboard
+  modal with a **Copy standup summary** button. A 📋 button in the
+  header copies a one-line summary for standup. Cached in
+  `localStorage["qa.dailyReport.v1"]` with a 5-minute TTL; auto-refreshes
+  at the next 10:00 boundary. Skeleton loading state, Test Case tickets
+  excluded.
 - **Close an issue from the panel** — On any Redmine issue detail page a new
   *Close this issue* section appears at the bottom of the panel. Pick a
   **Closed Version** from a dropdown that mirrors Redmine's own custom-field

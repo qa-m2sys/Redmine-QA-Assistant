@@ -2239,6 +2239,7 @@ body.qa-selecting .agile-issue{
     gap:6px;
 }
 .qa-similar-list[hidden]{ display:none; }
+.qa-similar-list:not(.qa-similar-expanded) .qa-similar-item-extra{ display:none; }
 .qa-similar-item a{
     display:flex;
     flex-direction:column;
@@ -2298,9 +2299,11 @@ body.qa-selecting .agile-issue{
 }
 .qa-similar-actions{
     display:flex;
+    gap:6px;
     margin-top:8px;
 }
 .qa-similar-actions .qa-btn{ flex:1; }
+.qa-similar-actions #qa-similar-more[hidden]{ display:none; }
 
 /* Copy button injected beside the Redmine issue header <h2>Bug #NNNN</h2>. */
 /* Lives outside #qa-panel scope — pure static styling, no CSS variables. */
@@ -2491,3 +2494,270 @@ body.qa-selecting .agile-issue{
 }
 .qa-audit-toggle input{ accent-color:var(--qa-brand, #4f8cff); }
 .qa-audit-toggle[hidden]{ display:none; }
+
+/* ---------- QA Daily Report widget (injected on agile board pages) ---------- */
+/* Lives outside #qa-panel scope — static tokens so it renders correctly on
+   Redmine's own light/dark themes without depending on our CSS variables. */
+.qa-board-daily{
+    margin:12px 0 16px;
+    padding:10px 14px;
+    background:rgba(79,140,255,0.08);
+    border:1px solid rgba(79,140,255,0.25);
+    border-radius:10px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    color:#1a1a1a;
+    font-size:13px;
+    line-height:1.5;
+}
+.qa-board-daily-top{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-bottom:4px;
+}
+.qa-board-daily-title{
+    background:transparent;
+    border:0;
+    padding:0;
+    margin:0;
+    font-weight:700;
+    color:#4f8cff;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+    font-size:11px;
+    font-family:inherit;
+    cursor:pointer;
+}
+.qa-board-daily-title:hover{ text-decoration:underline; }
+.qa-board-daily-window,
+.qa-board-daily-total{
+    color:#1a1a1a;
+    font-size:12px;
+}
+.qa-board-daily-total{ cursor:help; }
+.qa-board-daily-total strong{
+    color:#000;
+    font-size:14px;
+    margin-right:2px;
+    font-variant-numeric:tabular-nums;
+}
+.qa-board-daily-sep{
+    color:#888;
+    font-size:12px;
+    user-select:none;
+}
+.qa-board-daily-copy,
+.qa-board-daily-refresh{
+    background:transparent;
+    border:1px solid rgba(0,0,0,0.25);
+    border-radius:6px;
+    padding:2px 8px;
+    font-size:14px;
+    line-height:1;
+    color:#1a1a1a;
+    cursor:pointer;
+}
+.qa-board-daily-copy{ margin-left:auto; padding:2px 6px; }
+.qa-board-daily-copy:hover,
+.qa-board-daily-refresh:hover{
+    background:rgba(0,0,0,0.05);
+    border-color:rgba(0,0,0,0.3);
+    color:#111;
+}
+.qa-board-daily-refresh:disabled{
+    opacity:0.5;
+    cursor:default;
+}
+.qa-board-daily-chips{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:baseline;
+    gap:6px;
+    min-height:20px;
+}
+.qa-board-daily-chip{
+    display:inline-flex;
+    align-items:baseline;
+    gap:4px;
+    color:#1a1a1a;
+    text-decoration:none;
+}
+a.qa-board-daily-chip:hover{ text-decoration:underline; }
+.qa-board-daily-name{ font-weight:500; }
+.qa-board-daily-count{
+    font-variant-numeric:tabular-nums;
+    color:#4f8cff;
+    font-weight:700;
+}
+.qa-board-daily-chip-empty .qa-board-daily-count{
+    color:#666;
+    font-weight:600;
+}
+.qa-board-daily-crown{
+    font-size:12px;
+    margin-right:3px;
+    filter:saturate(0.9);
+}
+.qa-board-daily-chip-self{
+    background:rgba(79,140,255,0.15);
+    border:1px solid rgba(79,140,255,0.4);
+    border-radius:999px;
+    padding:1px 10px;
+    font:inherit;
+    color:#1a1a1a;
+    cursor:pointer;
+}
+.qa-board-daily-chip-self:hover{ background:rgba(79,140,255,0.25); }
+.qa-board-daily-empty{
+    color:#333;
+    font-style:italic;
+}
+.qa-board-daily-chip-skel{
+    display:inline-block;
+    width:72px; height:14px;
+    border-radius:7px;
+    background:linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.14), rgba(0,0,0,0.06));
+    background-size:200% 100%;
+    animation:qa-board-daily-shimmer 1.2s linear infinite;
+}
+@keyframes qa-board-daily-shimmer{
+    0%{ background-position:200% 0; }
+    100%{ background-position:-200% 0; }
+}
+
+/* Weekly leaderboard + Tester dashboard modals */
+.qa-board-daily-modal-overlay{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,0.45);
+    z-index:2147483000;
+    display:flex; align-items:center; justify-content:center;
+    padding:24px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+}
+.qa-board-daily-modal{
+    background:#fff;
+    color:#1a1a1a;
+    border-radius:12px;
+    box-shadow:0 20px 60px rgba(0,0,0,0.35);
+    max-width:920px; width:100%; max-height:88vh;
+    display:flex; flex-direction:column;
+    overflow:hidden;
+}
+.qa-board-daily-modal-head{
+    display:flex; align-items:center; gap:12px;
+    padding:14px 18px;
+    border-bottom:1px solid rgba(0,0,0,0.08);
+}
+.qa-board-daily-modal-title{
+    font-size:15px; font-weight:700;
+    flex:1;
+}
+.qa-board-daily-modal-close{
+    background:transparent; border:0;
+    font-size:22px; line-height:1;
+    cursor:pointer; color:#666;
+    padding:0 4px;
+}
+.qa-board-daily-modal-close:hover{ color:#111; }
+.qa-board-daily-modal-body{
+    padding:16px 18px;
+    overflow:auto;
+    font-size:13px;
+}
+.qa-board-daily-week-table{
+    width:100%;
+    border-collapse:separate;
+    border-spacing:4px;
+    font-variant-numeric:tabular-nums;
+}
+.qa-board-daily-week-table th,
+.qa-board-daily-week-table td{
+    padding:6px 8px;
+    text-align:center;
+    background:rgba(0,0,0,0.03);
+    border-radius:6px;
+    font-size:13px;
+}
+.qa-board-daily-week-table th{
+    background:transparent;
+    font-weight:600;
+    color:#555;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+}
+.qa-board-daily-week-table td.qa-board-daily-week-today{
+    outline:2px solid rgba(79,140,255,0.55);
+}
+.qa-board-daily-week-name{
+    text-align:left !important;
+    font-weight:500;
+}
+.qa-board-daily-week-total{
+    font-weight:700;
+    color:#4f8cff;
+}
+.qa-board-daily-week-footnote{
+    margin-top:10px;
+    font-size:11px;
+    color:#888;
+    line-height:1.5;
+}
+.qa-board-daily-me-summary{
+    display:flex; align-items:center; gap:10px;
+    margin-bottom:12px;
+    font-size:13px;
+    flex-wrap:wrap;
+}
+.qa-board-daily-me-summary strong{
+    color:#4f8cff;
+    font-size:16px;
+    font-variant-numeric:tabular-nums;
+}
+.qa-board-daily-me-copy{
+    margin-left:auto;
+    background:#4f8cff;
+    color:#fff;
+    border:0;
+    border-radius:6px;
+    padding:6px 12px;
+    font-size:12px;
+    font-weight:500;
+    cursor:pointer;
+}
+.qa-board-daily-me-copy:hover{ background:#3a76e6; }
+.qa-board-daily-me-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+}
+.qa-board-daily-me-table th{
+    text-align:left;
+    padding:6px 8px;
+    border-bottom:2px solid rgba(0,0,0,0.1);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    color:#555;
+}
+.qa-board-daily-me-table td{
+    padding:8px;
+    border-bottom:1px solid rgba(0,0,0,0.06);
+}
+.qa-board-daily-me-table a{
+    color:#4f8cff;
+    text-decoration:none;
+    font-weight:500;
+}
+.qa-board-daily-me-table a:hover{ text-decoration:underline; }
+.qa-board-daily-me-subject{
+    max-width:420px;
+    word-break:break-word;
+}
+.qa-board-daily-me-empty{
+    text-align:center;
+    color:#888;
+    padding:20px !important;
+    font-style:italic;
+}

@@ -5,7 +5,87 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.1 — current
+## Version 7.2.4 — current
+
+### 🔎 Similar closed tickets — wider net + See more
+The *Similar closed tickets* section was catching too few near-matches on
+longer subjects. Widened on every knob it has, without turning the panel
+into a wall of results.
+
+- 📈 **Up to 10 matches** instead of 5. The panel still shows the top **5**
+  by default; a **See more (N)** button appears next to *Refresh* when
+  extras are available and toggles between *See more* / *See fewer*.
+- 🔑 **5 keywords** sent to Redmine (was 3) — wider OR net inside
+  Redmine's substring filter, so more candidate rows come back for local
+  re-ranking.
+- 📦 **80 candidate rows** pulled per query (was 40), giving the local
+  Jaccard re-rank more headroom before the display cap kicks in.
+- 🎯 **Relevance threshold lowered** from 0.15 → 0.10 — partial
+  reworded matches on longer subjects (e.g. 2 tokens out of 13) now
+  qualify, while one-token coincidences ("login" alone) still get
+  filtered.
+- 🧹 **Cache carry-over:** entries stored under the old thresholds still
+  say "5 results". Hit **Refresh** once per ticket to re-run under the
+  widened knobs, or clear `localStorage["qa.similar.v1"]` to blast the
+  whole cache.
+
+---
+
+## Version 7.2.3
+
+### 📊 QA Daily Report — leaderboard, standup helpers & polish
+Builds on the 7.2.2 chip strip with the features the team actually asked
+for after using it for a day.
+
+- 🏆 **Top-today highlight** — the busiest teammate's chip gets a trophy
+  prefix (ties allowed).
+- 💬 **Team-total tooltip** — hover the *N total* pill to see the
+  cross-team tracker breakdown (e.g. *"18 Bug · 6 Suggestion · 3 Feature"*).
+- 📋 **Copy summary button** in the header — one click puts a Slack-ready
+  line on the clipboard: *"QA today (since Mon 10:00): 27 total —
+  Muntanuz 8, Jannatut 6, …"*.
+- 🙌 **Empty state** — when nothing has been filed since 10:00 the chip
+  strip reads *"Nothing filed since Mon 10:00 — quiet morning."* instead
+  of showing a row of zeros.
+- 🗓 **Weekly leaderboard modal** — click the *QA today* label to open a
+  7-day heatmap table (rows sorted by weekly total, columns per day,
+  today outlined, cell shade scaled to the busiest cell). Cached in
+  `localStorage["qa.dailyReport.week.v1"]` with a 30-minute TTL keyed to
+  the current 10:00 window.
+- 👤 **Personal tester dashboard** — your own chip becomes a pill button;
+  clicking it opens a modal listing every ticket you've filed in the
+  window (ID linking to Redmine, tracker, status, subject) with a
+  **Copy standup summary** button that produces a bulleted list. Current
+  user is detected from `#loggedas a`.
+- ⏰ **Auto-refresh at 10:00** — a scheduled timer re-runs the report at
+  the next 10:00 boundary so the widget rolls over without a page
+  reload.
+- ✨ **Skeleton loading state** — shimmering grey pills replace the old
+  *"Loading…"* text on first paint and on every Refresh.
+
+---
+
+## Version 7.2.2
+
+### 📊 QA Daily Report on the agile board
+- 🆕 A compact chip strip is now injected directly under the board's
+  header on every `/projects/*/agile/board*` page, showing how many
+  tickets each QA teammate has filed since **10:00 AM** local time
+  (rolling to yesterday 10:00 when it's still before 10:00).
+- 🔗 Each teammate's count is a link to Redmine's own issue list,
+  pre-filtered to that author + the same window — one click to
+  audit exactly what they logged today.
+- 💬 Hover a chip for the tracker breakdown
+  (e.g. *"Muntanuz Zaman — 5 Bug · 1 Feature"*).
+- 💾 Cached in `localStorage["qa.dailyReport.v1"]` with a 5-minute
+  TTL, keyed to the current 10 AM window so the total is always fresh
+  after the window rolls over. `↻` bypasses the cache.
+- 🧪 Test Case tickets are excluded from the count — same rule as
+  Sprint Audit.
+
+---
+
+## Version 7.2.1
 
 ### ⚡ Sprint audit: 2× faster
 - 🔀 Reopen and Feedback journal scans are now **one combined pass** —
