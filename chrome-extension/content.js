@@ -1317,7 +1317,8 @@ As a <role>, I want <goal> so that <benefit>.
         "Shishir Talha",
         "Sharmin Akter",
         "Sayma Tihany",
-        "Nafisa Feroz"
+        "Nafisa Feroz",
+        "Shafiqul Islam"
     ];
     const QA_DAILY_START_HOUR   = 10;
     const QA_DAILY_CACHE_KEY    = "qa.dailyReport.v1";
