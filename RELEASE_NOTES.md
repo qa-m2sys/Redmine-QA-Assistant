@@ -5,7 +5,20 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.4 — current
+## Version 7.2.5 — current
+
+### 🐾 QA Daily Report pet toggle
+Control the cat lane directly from the board widget.
+
+- ✅ Added a **Show Pet** checkbox in the QA Daily Report actions area.
+- 📴 Default is **unchecked**, so the cat is hidden unless you opt in.
+- 💾 Preference persists in `localStorage["qa.dailyReport.showPet.v1"]`.
+- 🛑 Turning it off now hides the cat lane and stops the running cat loop,
+  so no hidden animation keeps ticking.
+
+---
+
+## Version 7.2.4
 
 ### 🔎 Similar closed tickets — wider net + See more
 The *Similar closed tickets* section was catching too few near-matches on

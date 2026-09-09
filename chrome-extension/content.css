@@ -2452,6 +2452,13 @@ body.qa-selecting .agile-issue{
     margin-right:4px;
 }
 .qa-audit-list a:hover{ text-decoration:underline; }
+.qa-audit-subtle{
+    color:#64748b;
+    font-size:12px;
+    font-weight:400;
+    margin-left:6px;
+}
+.qa-modal-overlay.qa-dark .qa-audit-subtle{ color:#94a3b8; }
 .qa-audit-partial{
     color:#92400e;
     font-size:11px;
@@ -2499,6 +2506,10 @@ body.qa-selecting .agile-issue{
 /* Lives outside #qa-panel scope — static tokens so it renders correctly on
    Redmine's own light/dark themes without depending on our CSS variables. */
 .qa-board-daily{
+    position:relative;
+    display:flex;
+    align-items:stretch;
+    gap:10px;
     margin:12px 0 16px;
     padding:10px 14px;
     background:rgba(79,140,255,0.08);
@@ -2508,6 +2519,13 @@ body.qa-selecting .agile-issue{
     color:#1a1a1a;
     font-size:13px;
     line-height:1.5;
+    overflow:hidden;
+}
+.qa-board-daily-content{
+    flex:0 1 auto;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
 }
 .qa-board-daily-top{
     display:flex;
@@ -2558,7 +2576,29 @@ body.qa-selecting .agile-issue{
     color:#1a1a1a;
     cursor:pointer;
 }
-.qa-board-daily-copy{ margin-left:auto; padding:2px 6px; }
+.qa-board-daily-copy{ padding:2px 6px; }
+.qa-board-daily-actions{
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    gap:6px;
+}
+.qa-board-daily-pet-toggle{
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+    color:#555;
+    font-size:11px;
+    user-select:none;
+    cursor:pointer;
+}
+.qa-board-daily-pet-toggle input{
+    width:12px;
+    height:12px;
+    margin:0;
+    cursor:pointer;
+    accent-color:#4f8cff;
+}
 .qa-board-daily-copy:hover,
 .qa-board-daily-refresh:hover{
     background:rgba(0,0,0,0.05);
@@ -2624,6 +2664,128 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
 @keyframes qa-board-daily-shimmer{
     0%{ background-position:200% 0; }
     100%{ background-position:-200% 0; }
+}
+.qa-board-daily-cat{
+    flex:1 1 auto;
+    min-width:80px;
+    align-self:stretch;
+    position:relative;
+    overflow:hidden;
+    opacity:0.95;
+    pointer-events:none;
+}
+.qa-cat-walker{
+    position:absolute;
+    top:50%;
+    left:0;
+    width:48px;
+    height:36px;
+    margin-top:-18px;
+    will-change:transform;
+}
+.qa-cat-sprite{
+    position:relative;
+    width:100%;
+    height:100%;
+    will-change:transform;
+}
+.qa-cat-svg{
+    display:block;
+    width:48px;
+    height:36px;
+    image-rendering:pixelated;
+    shape-rendering:crispEdges;
+}
+/* Sprite parts: hide sitting pose by default; sit-state class swaps them in. */
+.qa-cat-tail-sit,
+.qa-cat-paws-sit,
+.qa-cat-front{ display:none; }
+.qa-cat-sprite.qa-cat-sit .qa-cat-side,
+.qa-cat-sprite.qa-cat-sit .qa-cat-tail-walk,
+.qa-cat-sprite.qa-cat-sit .qa-cat-legs-walk{ display:none; }
+.qa-cat-sprite.qa-cat-sit .qa-cat-front,
+.qa-cat-sprite.qa-cat-sit .qa-cat-tail-sit,
+.qa-cat-sprite.qa-cat-sit .qa-cat-paws-sit{ display:block; }
+
+/* Walk: sprite bob, tail wag, alternating leg step. */
+.qa-cat-sprite.qa-cat-walk .qa-cat-svg{ animation:qa-cat-bob 0.5s ease-in-out infinite; }
+.qa-cat-sprite.qa-cat-walk .qa-cat-tail-walk{
+    transform-origin:5px 12px;
+    transform-box:fill-box;
+    animation:qa-cat-tail-wag 0.6s ease-in-out infinite;
+}
+.qa-cat-sprite.qa-cat-walk .qa-cat-leg-a{
+    transform-box:fill-box;
+    animation:qa-cat-leg-a 0.4s ease-in-out infinite;
+}
+.qa-cat-sprite.qa-cat-walk .qa-cat-leg-b{
+    transform-box:fill-box;
+    animation:qa-cat-leg-b 0.4s ease-in-out infinite;
+}
+
+/* Idle: gentle breathing, slow tail sway, occasional blink. */
+.qa-cat-sprite.qa-cat-idle .qa-cat-svg{ animation:qa-cat-breathe 3.5s ease-in-out infinite; }
+.qa-cat-sprite.qa-cat-idle .qa-cat-tail-walk{
+    transform-origin:5px 12px;
+    transform-box:fill-box;
+    animation:qa-cat-tail-sway 2.2s ease-in-out infinite;
+}
+.qa-cat-sprite.qa-cat-idle .qa-cat-eyes{ animation:qa-cat-blink 4.5s steps(1,end) infinite; }
+
+/* Sit: breathing + rare blink + occasional tail flick. */
+.qa-cat-sprite.qa-cat-sit .qa-cat-svg{ animation:qa-cat-breathe 3.5s ease-in-out infinite; }
+.qa-cat-sprite.qa-cat-sit .qa-cat-tail-sit{
+    transform-origin:6px 18px;
+    transform-box:fill-box;
+    animation:qa-cat-tail-flick 2s ease-in-out infinite;
+}
+.qa-cat-sprite.qa-cat-sit .qa-cat-eyes{ animation:qa-cat-blink 5.5s steps(1,end) infinite; }
+
+/* Jump: brief hop — runs once when the pose class is applied. */
+.qa-cat-sprite.qa-cat-jump{ animation:qa-cat-hop 0.9s cubic-bezier(0.3,0,0.5,1) both; }
+
+@keyframes qa-cat-bob{
+    0%,100%{ transform:translateY(0); }
+    50%    { transform:translateY(-1px); }
+}
+@keyframes qa-cat-breathe{
+    0%,100%{ transform:scaleY(1); }
+    50%    { transform:scaleY(0.97); }
+}
+@keyframes qa-cat-tail-wag{
+    0%,100%{ transform:rotate(-15deg); }
+    50%    { transform:rotate(20deg); }
+}
+@keyframes qa-cat-tail-sway{
+    0%,100%{ transform:rotate(-5deg); }
+    50%    { transform:rotate(8deg); }
+}
+@keyframes qa-cat-tail-flick{
+    0%,80%,100%{ transform:rotate(0deg); }
+    88%        { transform:rotate(-10deg); }
+    94%        { transform:rotate(6deg); }
+}
+@keyframes qa-cat-leg-a{
+    0%,100%{ transform:translateY(0); }
+    50%    { transform:translateY(-1px); }
+}
+@keyframes qa-cat-leg-b{
+    0%,100%{ transform:translateY(-1px); }
+    50%    { transform:translateY(0); }
+}
+@keyframes qa-cat-hop{
+    0%   { transform:translateY(0); }
+    35%  { transform:translateY(-14px); }
+    55%  { transform:translateY(-14px); }
+    100% { transform:translateY(0); }
+}
+@keyframes qa-cat-blink{
+    0%,92%,100%{ opacity:1; }
+    95%        { opacity:0.15; }
+}
+@media (prefers-reduced-motion: reduce){
+    .qa-cat-sprite,
+    .qa-cat-sprite *{ animation:none !important; }
 }
 
 /* Weekly leaderboard + Tester dashboard modals */

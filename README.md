@@ -89,6 +89,7 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
 - The top-scoring chip gets a 🏆, and if you're on the QA team your own chip becomes a pill button that opens a **tester dashboard** modal (table of your tickets + a *Copy standup summary* button).
 - Click the **QA today** label to open a **weekly leaderboard** modal — a 7-day heatmap of who filed what across the whole team.
 - **Copy summary** (📋) button copies a one-liner like *"QA today (since Mon 10:00): 27 total — Muntanuz 8, Jannatut 6, …"* straight to your clipboard for standup.
+- **Show Pet** checkbox toggles the cat lane animation; it starts **off by default** and remembers your preference for later visits.
 - Cached in `localStorage["qa.dailyReport.v1"]` with a 5-minute TTL keyed to the current 10 AM window; weekly data has its own 30-min cache. `↻` bypasses. Widget auto-refreshes when the 10 AM window rolls over.
 - Skeleton chips animate on first load.
 - Test Case tickets are excluded from the count.
@@ -210,7 +211,8 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a full history of what changed in e
   a *"quiet morning"* message. Click **QA today** for a 7-day heatmap
   leaderboard modal; click your own chip for a personal dashboard
   modal with a **Copy standup summary** button. A 📋 button in the
-  header copies a one-line summary for standup. Cached in
+  header copies a one-line summary for standup. A **Show Pet** checkbox
+  controls the cat animation and defaults to off. Cached in
   `localStorage["qa.dailyReport.v1"]` with a 5-minute TTL; auto-refreshes
   at the next 10:00 boundary. Skeleton loading state, Test Case tickets
   excluded.

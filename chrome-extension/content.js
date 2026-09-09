@@ -1324,6 +1324,7 @@ As a <role>, I want <goal> so that <benefit>.
     const QA_DAILY_CACHE_TTL_MS = 5 * 60 * 1000;
     const QA_DAILY_WEEK_CACHE_KEY    = "qa.dailyReport.week.v1";
     const QA_DAILY_WEEK_CACHE_TTL_MS = 30 * 60 * 1000;
+    const QA_DAILY_SHOW_PET_KEY = "qa.dailyReport.showPet.v1";
 
     // Extract { projectSlug, versionId } from the current agile board URL.
     // The pathname carries the project (`/projects/<slug>/agile/board/…`)
@@ -1876,6 +1877,7 @@ As a <role>, I want <goal> so that <benefit>.
                 params.append("c[]", "status");
                 params.append("c[]", "subject");
                 params.append("c[]", "assigned_to");
+                params.append("c[]", "author");
                 params.append("c[]", "priority");
                 params.append("c[]", "updated_on");
                 params.append("c[]", "cf_" + CLOSED_VERSION_CF_ID);
@@ -1895,8 +1897,9 @@ As a <role>, I want <goal> so that <benefit>.
                         id: m[1],
                         subject:       ((tr.querySelector("td.subject a") || tr.querySelector("td.subject") || {}).textContent || "").trim(),
                         status:        ((tr.querySelector("td.status")      || {}).textContent || "").trim(),
-                        tracker:       ((tr.querySelector("td.tracker")     || {}).textContent || "").trim(),
+                        tracker:       ((tr.querySelector("td.tracker")     || {}).textContent || "").trim().replace(/\s+/g, " "),
                         assignee:      ((tr.querySelector("td.assigned_to") || {}).textContent || "").trim(),
+                        author:        ((tr.querySelector("td.author a")    || tr.querySelector("td.author") || {}).textContent || "").trim().replace(/\s+/g, " "),
                         priority:      ((tr.querySelector("td.priority")    || {}).textContent || "").trim(),
                         updated_on:    ((tr.querySelector("td.updated_on")  || {}).textContent || "").trim(),
                         closedVersion: ((tr.querySelector("td.cf_" + CLOSED_VERSION_CF_ID) || {}).textContent || "").trim()
@@ -2181,10 +2184,23 @@ As a <role>, I want <goal> so that <benefit>.
                 .map(([name, count]) => ({ name: name, count: count }))
                 .sort((a, b) => b.count - a.count);
         }
-        const closedByAssignee = tally(closedRows, r => r.assignee);
         const reopenRows       = scanResult.perPattern.reopen.rows.filter(notExcluded);
         const feedbackRows     = scanResult.perPattern.feedback.rows.filter(notExcluded);
         const reopensAgainst   = tally(reopenRows, r => r.assignee);
+
+        // Reported By — Bugs + Suggestions filed by each QA team member in this sprint.
+        const qaSet = new Set(QA_TEAM_MEMBERS);
+        const reportedByMap = new Map();
+        QA_TEAM_MEMBERS.forEach(n => reportedByMap.set(n, { name: n, bugs: 0, suggestions: 0, total: 0 }));
+        sprintRows.forEach(r => {
+            if (!qaSet.has(r.author)) return;
+            const t = String(r.tracker || "").toLowerCase();
+            const b = reportedByMap.get(r.author);
+            if (t === "bug")        { b.bugs++; b.total++; }
+            else if (t === "suggestion") { b.suggestions++; b.total++; }
+        });
+        const reportedBy = Array.from(reportedByMap.values())
+            .sort((a, b) => (b.total - a.total) || a.name.localeCompare(b.name));
 
         // Historical reopens that are now closed don't block ship.
         const currentlyReopened = reopenRows.filter(r => /reopen/i.test(r.status));
@@ -2220,9 +2236,10 @@ As a <role>, I want <goal> so that <benefit>.
             overview: { total: totalIssues, closed: closedRows.length, open: openRows.length, closedPct: closedPct },
             byTracker: byTracker,
             untriaged: untriaged,
+            mismatched: mismatched,
             feedback:  { count: feedbackRows.length, pct: feedbackPct, rows: feedbackRows, timedOut: scanResult.timedOut },
             reopens:   { count: reopenRows.length,   pct: reopenPct,   rows: reopenRows,   timedOut: scanResult.timedOut, closedTotal: closedRows.length },
-            assignees: { closedBy: closedByAssignee, reopensAgainst: reopensAgainst },
+            assignees: { reportedBy: reportedBy, reopensAgainst: reopensAgainst },
             verdict:   verdict,
             partial:   scanResult.timedOut,
             resumeState: scanResult.resumeState
@@ -2278,6 +2295,14 @@ As a <role>, I want <goal> so that <benefit>.
             });
             lines.push("");
         }
+        if (audit.mismatched && audit.mismatched.length) {
+            lines.push("## Closed tickets missing Closed Version tag: " + audit.mismatched.length + " ticket" + (audit.mismatched.length === 1 ? "" : "s"));
+            audit.mismatched.forEach(m => {
+                const url = location.origin + "/issues/" + m.id;
+                lines.push("- [#" + m.id + "](" + url + ") · " + (m.subject || "(no subject)"));
+            });
+            lines.push("");
+        }
         if (audit.feedback.count) {
             lines.push("## Churn (Feedback bounces): " + audit.feedback.count + " ticket" + (audit.feedback.count === 1 ? "" : "s") + ", " + audit.feedback.pct + "%");
             audit.feedback.rows.forEach(r => {
@@ -2294,9 +2319,13 @@ As a <role>, I want <goal> so that <benefit>.
             });
             lines.push("");
         }
-        if (showAssignees && audit.assignees.closedBy.length) {
-            lines.push("## Closed by assignee");
-            lines.push(audit.assignees.closedBy.map(a => a.name + " " + a.count).join(" · "));
+        if (showAssignees && audit.assignees.reportedBy.length) {
+            lines.push("## Reported By (Bugs + Suggestions per QA member)");
+            lines.push("| QA Member | Bugs | Suggestions | Total |");
+            lines.push("|-----------|-----:|------------:|------:|");
+            audit.assignees.reportedBy.forEach(b => {
+                lines.push("| " + b.name + " | " + b.bugs + " | " + b.suggestions + " | " + b.total + " |");
+            });
             lines.push("");
         }
         if (showAssignees && audit.assignees.reopensAgainst.length) {
@@ -2368,6 +2397,14 @@ As a <role>, I want <goal> so that <benefit>.
             });
             lines.push("");
         }
+        if (audit.mismatched && audit.mismatched.length) {
+            heading("Closed tickets missing Closed Version tag: " + audit.mismatched.length + " ticket" + (audit.mismatched.length === 1 ? "" : "s"));
+            audit.mismatched.forEach(m => {
+                const url = location.origin + "/issues/" + m.id;
+                lines.push("  #" + m.id + " · " + (m.subject || "(no subject)") + " · " + url);
+            });
+            lines.push("");
+        }
         if (audit.feedback.count) {
             heading("Churn (Feedback bounces): " + audit.feedback.count + " ticket" + (audit.feedback.count === 1 ? "" : "s") + ", " + audit.feedback.pct + "%");
             audit.feedback.rows.forEach(r => {
@@ -2384,9 +2421,15 @@ As a <role>, I want <goal> so that <benefit>.
             });
             lines.push("");
         }
-        if (showAssignees && audit.assignees.closedBy.length) {
-            heading("Closed by assignee");
-            lines.push(audit.assignees.closedBy.map(a => a.name + " " + a.count).join(" · "));
+        if (showAssignees && audit.assignees.reportedBy.length) {
+            heading("Reported By (Bugs + Suggestions per QA member)");
+            const nameW = Math.max.apply(null, audit.assignees.reportedBy.map(b => b.name.length).concat([9]));
+            audit.assignees.reportedBy.forEach(b => {
+                const nm = b.name + " ".repeat(nameW - b.name.length);
+                lines.push("  " + nm + "   Bugs " + String(b.bugs).padStart(3) +
+                    "   Suggestions " + String(b.suggestions).padStart(3) +
+                    "   Total " + String(b.total).padStart(3));
+            });
             lines.push("");
         }
         if (showAssignees && audit.assignees.reopensAgainst.length) {
@@ -2789,6 +2832,7 @@ As a <role>, I want <goal> so that <benefit>.
                                 <input type="checkbox" id="qa-audit-show-assignees">
                                 <span>Show individual assignee stats</span>
                             </label>
+                            <button class="qa-btn qa-tmpl-btn qa-action" data-action="audit-refresh" id="qa-audit-refresh" type="button" title="Re-run the audit (bypass cache)"><span class="qa-btn-icon">${svgIcon("rotate-ccw")}</span><span class="qa-btn-label">Refresh</span></button>
                             <button class="qa-btn qa-tmpl-btn qa-action" data-action="audit-copy" id="qa-audit-copy" disabled type="button" title="Copy full report as Markdown"><span class="qa-btn-icon">${svgIcon("copy")}</span><span class="qa-btn-label">Copy report</span></button>
                             <button class="qa-btn qa-tmpl-btn qa-action" data-action="audit-copy-plain" id="qa-audit-copy-plain" disabled type="button" title="Copy full report as plain text (no Markdown)"><span class="qa-btn-icon">${svgIcon("copy")}</span><span class="qa-btn-label">Copy plain</span></button>
                             <button class="qa-btn qa-tmpl-btn" data-action="audit-close" type="button"><span class="qa-btn-label">Close</span></button>
@@ -4275,6 +4319,7 @@ As a <role>, I want <goal> so that <benefit>.
             const auditLoadTxt    = auditModal && auditModal.querySelector("#qa-audit-loading-text");
             const auditCopy       = auditModal && auditModal.querySelector("#qa-audit-copy");
             const auditCopyPlain  = auditModal && auditModal.querySelector("#qa-audit-copy-plain");
+            const auditRefreshBtn = auditModal && auditModal.querySelector("#qa-audit-refresh");
             const auditToggle     = auditModal && auditModal.querySelector("#qa-audit-show-assignees");
             const auditToggleWrap = auditModal && auditModal.querySelector("#qa-audit-toggle-wrap");
 
@@ -4420,10 +4465,13 @@ As a <role>, I want <goal> so that <benefit>.
                     html += '</ul></section>';
                 }
 
-                if (showA && a.assignees.closedBy.length) {
-                    html += '<section class="qa-audit-section"><h3>Closed by assignee</h3>';
-                    html += '<p class="qa-audit-tally">' + a.assignees.closedBy.map(x => esc(x.name) + ' <strong>' + x.count + '</strong>').join(' · ') + '</p>';
-                    html += '</section>';
+                if (showA && a.assignees.reportedBy.length) {
+                    html += '<section class="qa-audit-section"><h3>Reported By <span class="qa-audit-subtle">(Bugs + Suggestions per QA member)</span></h3>';
+                    html += '<table class="qa-audit-table"><thead><tr><th>QA Member</th><th>Bugs</th><th>Suggestions</th><th>Total</th></tr></thead><tbody>';
+                    a.assignees.reportedBy.forEach(b => {
+                        html += '<tr><td>' + esc(b.name) + '</td><td>' + b.bugs + '</td><td>' + b.suggestions + '</td><td><strong>' + b.total + '</strong></td></tr>';
+                    });
+                    html += '</tbody></table></section>';
                 }
                 if (showA && a.assignees.reopensAgainst.length) {
                     html += '<section class="qa-audit-section"><h3>Reopens against</h3>';
@@ -4485,6 +4533,17 @@ As a <role>, I want <goal> so that <benefit>.
                     }
                 });
             }
+
+            if (auditRefreshBtn) auditRefreshBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                if (auditRunning) return;
+                const scope = getCurrentBoardScope();
+                if (!scope) { toast("Open an Agile board first."); return; }
+                auditCache.delete(auditCacheKey(scope));
+                // Close the modal so the header button's progress label is visible; the audit handler re-opens it with fresh data.
+                closeAuditModal();
+                auditBtn.click();
+            });
 
             if (auditBtn) {
                 console.info("[QA Assistant] Sprint audit button wired");
@@ -5599,6 +5658,13 @@ As a <role>, I want <goal> so that <benefit>.
     function qaDailyWeekCacheSave(entry) {
         try { localStorage.setItem(QA_DAILY_WEEK_CACHE_KEY, JSON.stringify(entry)); } catch (_) { /* quota */ }
     }
+    function qaDailyShowPetLoad() {
+        try { return localStorage.getItem(QA_DAILY_SHOW_PET_KEY) === "1"; }
+        catch (_) { return false; }
+    }
+    function qaDailyShowPetSave(on) {
+        try { localStorage.setItem(QA_DAILY_SHOW_PET_KEY, on ? "1" : "0"); } catch (_) { /* quota */ }
+    }
 
     // Auto-refresh handle — cleared before every re-arm so timers can't stack.
     let qaDailyRefreshTimer = null;
@@ -5613,6 +5679,108 @@ As a <role>, I want <goal> so that <benefit>.
         }, delay + 5000);
     }
 
+    // Cat state machine: cycles between walk / sit / jump / idle inside the
+    // cat lane. Position + facing live on .qa-cat-walker (translateX + scaleX)
+    // so CSS pose animations on the inner .qa-cat-sprite compose cleanly.
+    function qaCatStop(root) {
+        const cat = root.querySelector(".qa-board-daily-cat");
+        if (!cat) return;
+        cat.dataset.qaCatRunning = "0";
+        cat.dataset.qaCatRunId = String(Date.now());
+        const walker = cat.querySelector(".qa-cat-walker");
+        const sprite = cat.querySelector(".qa-cat-sprite");
+        if (walker) {
+            walker.style.transition = "none";
+            walker.style.transform = "translateX(0px) scaleX(1)";
+        }
+        if (sprite) sprite.className = "qa-cat-sprite qa-cat-sit";
+    }
+
+    function qaCatStart(root) {
+        const cat = root.querySelector(".qa-board-daily-cat");
+        if (!cat) return;
+        if (cat.dataset.qaCatRunning === "1") return;
+        const walker = cat.querySelector(".qa-cat-walker");
+        const sprite = cat.querySelector(".qa-cat-sprite");
+        if (!walker || !sprite) return;
+
+        const runId = String(Date.now() + Math.random());
+        cat.dataset.qaCatRunning = "1";
+        cat.dataset.qaCatRunId = runId;
+        const isActive = () => document.body.contains(cat)
+            && cat.dataset.qaCatRunning === "1"
+            && cat.dataset.qaCatRunId === runId;
+
+        const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduce) {
+            sprite.className = "qa-cat-sprite qa-cat-sit";
+            walker.style.transform = "translateX(0px) scaleX(1)";
+            return;
+        }
+
+        let x = 0;
+        let facing = 1;
+        const laneWidth = () => Math.max(0, (cat.clientWidth || 0) - 48);
+
+        const setPose = (pose) => { sprite.className = "qa-cat-sprite qa-cat-" + pose; };
+        const setTransform = (transition) => {
+            walker.style.transition = transition || "none";
+            walker.style.transform = "translateX(" + x + "px) scaleX(" + facing + ")";
+        };
+
+        const decide = () => {
+            if (!isActive()) return;
+            const maxX = laneWidth();
+            if (maxX <= 0) { setTimeout(decide, 1500); return; }
+            if (x > maxX) x = maxX;
+            if (x < 0) x = 0;
+
+            const remaining = facing > 0 ? (maxX - x) : x;
+            if (remaining < 20) {
+                setPose("sit");
+                setTransform();
+                setTimeout(() => {
+                    if (!isActive()) return;
+                    facing = -facing;
+                    setTransform();
+                    decide();
+                }, 1400 + Math.random() * 1600);
+                return;
+            }
+
+            const r = Math.random();
+            if (r < 0.55) {
+                const dist = Math.min(remaining, 40 + Math.random() * 140);
+                const speed = 22 + Math.random() * 10;
+                const dur = Math.round((dist / speed) * 1000);
+                setPose("walk");
+                x = x + facing * dist;
+                setTransform("transform " + dur + "ms linear");
+                setTimeout(decide, dur + 40);
+            } else if (r < 0.78) {
+                setPose("sit");
+                setTransform();
+                setTimeout(decide, 1500 + Math.random() * 2500);
+            } else if (r < 0.9) {
+                setPose("jump");
+                setTransform();
+                setTimeout(() => {
+                    if (!isActive()) return;
+                    setPose("walk");
+                    setTimeout(decide, 120);
+                }, 900);
+            } else {
+                setPose("idle");
+                setTransform();
+                setTimeout(decide, 2000 + Math.random() * 1800);
+            }
+        };
+
+        setPose("walk");
+        setTransform();
+        setTimeout(decide, 600);
+    }
+
     // Idempotent — safe to call from a MutationObserver on every #content mutation.
     function mountBoardDailyReport() {
         if (location.origin !== REDMINE) return;
@@ -5625,16 +5793,137 @@ As a <role>, I want <goal> so that <benefit>.
         wrap.id = "qa-board-daily";
         wrap.className = "qa-board-daily";
         wrap.innerHTML = ''
-            + '<div class="qa-board-daily-top">'
-            +   '<button type="button" class="qa-board-daily-title" id="qa-board-daily-title" title="Open weekly leaderboard">QA today</button>'
-            +   '<span class="qa-board-daily-sep">·</span>'
-            +   '<span class="qa-board-daily-window" id="qa-board-daily-window">…</span>'
-            +   '<span class="qa-board-daily-sep">·</span>'
-            +   '<span class="qa-board-daily-total" id="qa-board-daily-total-pill"><strong id="qa-board-daily-total">0</strong> total</span>'
+            + '<div class="qa-board-daily-content">'
+            +   '<div class="qa-board-daily-top">'
+            +     '<button type="button" class="qa-board-daily-title" id="qa-board-daily-title" title="Open weekly leaderboard">QA today</button>'
+            +     '<span class="qa-board-daily-sep">·</span>'
+            +     '<span class="qa-board-daily-window" id="qa-board-daily-window">…</span>'
+            +     '<span class="qa-board-daily-sep">·</span>'
+            +     '<span class="qa-board-daily-total" id="qa-board-daily-total-pill"><strong id="qa-board-daily-total">0</strong> total</span>'
+            +   '</div>'
+            +   '<div class="qa-board-daily-chips" id="qa-board-daily-chips"></div>'
+            + '</div>'
+            + '<div class="qa-board-daily-cat" aria-hidden="true" title="just here for vibes"><div class="qa-cat-walker"><div class="qa-cat-sprite qa-cat-walk">'
+            +   '<svg class="qa-cat-svg" viewBox="0 0 32 24" fill="#f4a261" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">'
+            +     '<g class="qa-cat-side">'
+            +       '<g class="qa-cat-tail-walk">'
+            +         '<rect x="1" y="10" width="2" height="2"/>'
+            +         '<rect x="0" y="8" width="2" height="2"/>'
+            +         '<rect x="0" y="6" width="2" height="2"/>'
+            +         '<rect x="1" y="4" width="2" height="2"/>'
+            +         '<rect x="1" y="7" width="1" height="1" fill="#d67a3e"/>'
+            +         '<rect x="1" y="4" width="1" height="1" fill="#ffd6a5"/>'
+            +       '</g>'
+            +       '<rect x="18" y="3" width="2" height="3"/>'
+            +       '<rect x="19" y="2" width="1" height="1"/>'
+            +       '<rect x="27" y="3" width="2" height="3"/>'
+            +       '<rect x="27" y="2" width="1" height="1"/>'
+            +       '<rect x="18" y="4" width="1" height="2" fill="#ffb391"/>'
+            +       '<rect x="28" y="4" width="1" height="2" fill="#ffb391"/>'
+            +       '<rect x="17" y="5" width="13" height="9"/>'
+            +       '<rect x="16" y="10" width="1" height="3"/>'
+            +       '<rect x="30" y="10" width="1" height="3"/>'
+            +       '<rect x="20" y="5" width="1" height="2" fill="#d67a3e"/>'
+            +       '<rect x="23" y="5" width="1" height="2" fill="#d67a3e"/>'
+            +       '<rect x="25" y="5" width="1" height="2" fill="#d67a3e"/>'
+            +       '<rect x="27" y="5" width="1" height="2" fill="#d67a3e"/>'
+            +       '<rect x="21" y="7" width="1" height="1" fill="#d67a3e"/>'
+            +       '<rect x="26" y="7" width="1" height="1" fill="#d67a3e"/>'
+            +       '<g class="qa-cat-eyes">'
+            +         '<rect x="19" y="8" width="3" height="3" fill="#ffffff"/>'
+            +         '<rect x="24" y="8" width="3" height="3" fill="#ffffff"/>'
+            +         '<rect x="20" y="9" width="1" height="1" fill="#1a1a1a"/>'
+            +         '<rect x="25" y="9" width="1" height="1" fill="#1a1a1a"/>'
+            +       '</g>'
+            +       '<rect x="23" y="11" width="2" height="1" fill="#e6879a"/>'
+            +       '<rect x="23" y="12" width="1" height="1" fill="#e6879a"/>'
+            +       '<rect x="22" y="13" width="1" height="1" fill="#1a1a1a"/>'
+            +       '<rect x="24" y="13" width="1" height="1" fill="#1a1a1a"/>'
+            +       '<rect x="13" y="11" width="3" height="1" fill="#4a4a4a" opacity="0.55"/>'
+            +       '<rect x="13" y="12" width="3" height="1" fill="#4a4a4a" opacity="0.45"/>'
+            +       '<rect x="30" y="11" width="2" height="1" fill="#4a4a4a" opacity="0.55"/>'
+            +       '<rect x="30" y="12" width="2" height="1" fill="#4a4a4a" opacity="0.45"/>'
+            +       '<rect x="3" y="13" width="17" height="8"/>'
+            +       '<rect x="5" y="13" width="1" height="3" fill="#d67a3e"/>'
+            +       '<rect x="8" y="13" width="1" height="3" fill="#d67a3e"/>'
+            +       '<rect x="11" y="13" width="1" height="3" fill="#d67a3e"/>'
+            +       '<rect x="14" y="13" width="1" height="3" fill="#d67a3e"/>'
+            +       '<rect x="17" y="13" width="1" height="3" fill="#d67a3e"/>'
+            +       '<rect x="4" y="16" width="16" height="5" fill="#ffd6a5"/>'
+            +       '<g class="qa-cat-legs-walk">'
+            +         '<rect class="qa-cat-leg qa-cat-leg-a" x="4" y="20" width="2" height="3"/>'
+            +         '<rect class="qa-cat-leg qa-cat-leg-b" x="8" y="20" width="2" height="3"/>'
+            +         '<rect class="qa-cat-leg qa-cat-leg-b" x="14" y="20" width="2" height="3"/>'
+            +         '<rect class="qa-cat-leg qa-cat-leg-a" x="18" y="20" width="2" height="3"/>'
+            +         '<rect x="4" y="22" width="2" height="1" fill="#1a1a1a"/>'
+            +         '<rect x="8" y="22" width="2" height="1" fill="#1a1a1a"/>'
+            +         '<rect x="14" y="22" width="2" height="1" fill="#1a1a1a"/>'
+            +         '<rect x="18" y="22" width="2" height="1" fill="#1a1a1a"/>'
+            +       '</g>'
+            +     '</g>'
+            +     '<g class="qa-cat-front">'
+            +       '<rect x="9" y="4" width="3" height="3"/>'
+            +       '<rect x="10" y="3" width="2" height="1"/>'
+            +       '<rect x="20" y="4" width="3" height="3"/>'
+            +       '<rect x="20" y="3" width="2" height="1"/>'
+            +       '<rect x="10" y="5" width="1" height="2" fill="#ffb391"/>'
+            +       '<rect x="21" y="5" width="1" height="2" fill="#ffb391"/>'
+            +       '<rect x="9" y="4" width="1" height="1" fill="#d67a3e"/>'
+            +       '<rect x="22" y="4" width="1" height="1" fill="#d67a3e"/>'
+            +       '<rect x="9" y="7" width="14" height="7"/>'
+            +       '<rect x="8" y="10" width="1" height="3"/>'
+            +       '<rect x="23" y="10" width="1" height="3"/>'
+            +       '<rect x="7" y="11" width="1" height="1"/>'
+            +       '<rect x="24" y="11" width="1" height="1"/>'
+            +       '<rect x="11" y="7" width="1" height="2" fill="#d67a3e"/>'
+            +       '<rect x="14" y="7" width="1" height="2" fill="#d67a3e"/>'
+            +       '<rect x="17" y="7" width="1" height="2" fill="#d67a3e"/>'
+            +       '<rect x="20" y="7" width="1" height="2" fill="#d67a3e"/>'
+            +       '<g class="qa-cat-eyes">'
+            +         '<rect x="11" y="9" width="3" height="3" fill="#ffffff"/>'
+            +         '<rect x="18" y="9" width="3" height="3" fill="#ffffff"/>'
+            +         '<rect x="12" y="10" width="1" height="2" fill="#1a1a1a"/>'
+            +         '<rect x="19" y="10" width="1" height="2" fill="#1a1a1a"/>'
+            +         '<rect x="13" y="10" width="1" height="1" fill="#ffd6a5" opacity="0.7"/>'
+            +         '<rect x="20" y="10" width="1" height="1" fill="#ffd6a5" opacity="0.7"/>'
+            +       '</g>'
+            +       '<rect x="15" y="11" width="2" height="1" fill="#e6879a"/>'
+            +       '<rect x="15" y="12" width="2" height="1" fill="#e6879a"/>'
+            +       '<rect x="15" y="13" width="1" height="1" fill="#1a1a1a"/>'
+            +       '<rect x="16" y="13" width="1" height="1" fill="#1a1a1a"/>'
+            +       '<rect x="5" y="11" width="3" height="1" fill="#4a4a4a" opacity="0.55"/>'
+            +       '<rect x="5" y="12" width="3" height="1" fill="#4a4a4a" opacity="0.45"/>'
+            +       '<rect x="24" y="11" width="3" height="1" fill="#4a4a4a" opacity="0.55"/>'
+            +       '<rect x="24" y="12" width="3" height="1" fill="#4a4a4a" opacity="0.45"/>'
+            +       '<rect x="7" y="14" width="18" height="7"/>'
+            +       '<rect x="8" y="14" width="1" height="3" fill="#d67a3e"/>'
+            +       '<rect x="24" y="14" width="1" height="3" fill="#d67a3e"/>'
+            +       '<rect x="9" y="15" width="14" height="6" fill="#ffd6a5"/>'
+            +       '<rect x="15" y="14" width="2" height="1" fill="#ffd6a5"/>'
+            +       '<g class="qa-cat-tail-sit">'
+            +         '<rect x="24" y="15" width="2" height="2"/>'
+            +         '<rect x="25" y="17" width="2" height="2"/>'
+            +         '<rect x="24" y="19" width="2" height="2"/>'
+            +         '<rect x="22" y="20" width="2" height="1"/>'
+            +         '<rect x="25" y="18" width="1" height="1" fill="#d67a3e"/>'
+            +         '<rect x="22" y="20" width="1" height="1" fill="#ffd6a5"/>'
+            +       '</g>'
+            +       '<g class="qa-cat-paws-sit">'
+            +         '<rect x="10" y="19" width="4" height="3"/>'
+            +         '<rect x="18" y="19" width="4" height="3"/>'
+            +         '<rect x="11" y="20" width="1" height="2" fill="#d67a3e"/>'
+            +         '<rect x="20" y="20" width="1" height="2" fill="#d67a3e"/>'
+            +         '<rect x="10" y="22" width="4" height="1" fill="#1a1a1a"/>'
+            +         '<rect x="18" y="22" width="4" height="1" fill="#1a1a1a"/>'
+            +       '</g>'
+            +     '</g>'
+            +   '</svg>'
+            + '</div></div></div>'
+            + '<div class="qa-board-daily-actions">'
+            +   '<label class="qa-board-daily-pet-toggle" for="qa-board-daily-show-pet"><input type="checkbox" id="qa-board-daily-show-pet" aria-label="Show Pet"><span>Show Pet</span></label>'
             +   '<button type="button" class="qa-board-daily-copy" id="qa-board-daily-copy" title="Copy summary for standup" aria-label="Copy summary">📋</button>'
             +   '<button type="button" class="qa-board-daily-refresh" id="qa-board-daily-refresh" title="Refresh (bypass cache)" aria-label="Refresh">↻</button>'
-            + '</div>'
-            + '<div class="qa-board-daily-chips" id="qa-board-daily-chips"></div>';
+            + '</div>';
         anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
 
         wrap.querySelector("#qa-board-daily-refresh").addEventListener("click", (e) => {
@@ -5660,6 +5949,23 @@ As a <role>, I want <goal> so that <benefit>.
             e.preventDefault();
             openQaWeeklyLeaderboard();
         });
+
+        const showPetEl = wrap.querySelector("#qa-board-daily-show-pet");
+        const applyShowPet = () => {
+            const on = !!(showPetEl && showPetEl.checked);
+            const catEl = wrap.querySelector(".qa-board-daily-cat");
+            if (catEl) catEl.style.visibility = on ? "" : "hidden";
+            if (on) qaCatStart(wrap);
+            else qaCatStop(wrap);
+        };
+        if (showPetEl) {
+            showPetEl.checked = qaDailyShowPetLoad();
+            showPetEl.addEventListener("change", () => {
+                qaDailyShowPetSave(showPetEl.checked);
+                applyShowPet();
+            });
+        }
+        applyShowPet();
 
         renderQaDailyReportSkeleton();
         runQaDailyReport(false);
