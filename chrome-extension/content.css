@@ -2237,9 +2237,11 @@ body.qa-selecting .agile-issue{
     display:flex;
     flex-direction:column;
     gap:6px;
+    max-height:320px;
+    overflow-y:auto;
+    overscroll-behavior:contain;
 }
 .qa-similar-list[hidden]{ display:none; }
-.qa-similar-list:not(.qa-similar-expanded) .qa-similar-item-extra{ display:none; }
 .qa-similar-item a{
     display:flex;
     flex-direction:column;

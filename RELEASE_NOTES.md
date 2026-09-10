@@ -5,7 +5,31 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.5 — current
+## Version 7.2.6 — current
+
+### 🔎 Similar closed tickets — description-aware ranking + infinite scroll
+The similarity ranker only ever looked at ticket subjects, and the result
+list was capped at a flat 10. Both are addressed:
+
+- 🧠 **Description now feeds the ranking** — subject overlap is still the
+  primary signal, but each candidate's description is now fetched in the
+  same request and scored as a secondary signal, alongside the existing
+  same-tracker bonus.
+- 📈 **Fetches up to 100 closed candidates** (was 80) before local
+  re-ranking, and keeps every match that clears the relevance threshold
+  instead of capping at 10.
+- ♾️ **Infinite scroll** — still shows **5** by default; **See more**
+  reveals up to **10**, then scrolling to the bottom of the list loads
+  **10 more at a time** until every ranked match has been shown. The
+  list is now its own scrollable region so paging through a long match
+  list doesn't scroll the whole panel.
+- 🗄 **Cache bumped to `qa.similar.v2`** — old cached results (subject-only,
+  capped at 10) are invalidated automatically so the new ranking and
+  pagination apply on the next view of any ticket.
+
+---
+
+## Version 7.2.5
 
 ### 🐾 QA Daily Report pet toggle
 Control the cat lane directly from the board widget.

@@ -76,8 +76,8 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
 
 ### 🔎 Similar closed tickets
 - On any issue detail page (`/issues/<n>`), the panel gains a **"Similar closed tickets"** section that auto-populates on load.
-- Scans the project's already-closed tickets whose subject overlaps the current one — the local ranker keeps the top **10** by keyword Jaccard overlap with a same-tracker bonus.
-- The panel shows **5** by default; when more matches are available, a **See more (N)** button appears next to Refresh and toggles into *See fewer*.
+- Scans up to **100** of the project's already-closed tickets whose subject overlaps the current one — the local ranker scores on **subject overlap (primary) + description overlap (secondary) + a same-tracker bonus**.
+- The panel shows **5** by default; a **See more** button reveals the next batch (up to 10 total), then scrolling to the bottom of the list loads **10 more at a time** until every ranked match has been shown.
 - Each row shows `#id · Tracker · match%`, a 2-line subject, and the closed version (e.g. *Closed in v9.4.0*), opening in a new tab so your current ticket stays put.
 - Results are cached per issue in `localStorage` and signed by `subject|tracker`, so a rename auto-invalidates the cache. **Refresh** re-runs the search bypassing the cache.
 - Test Case tickets are excluded from the results.
@@ -195,9 +195,11 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a full history of what changed in e
 - **Clear Form** — Clears the subject and description fields in one click.
 - **Similar closed tickets** — On any Redmine issue detail page a new
   *Similar closed tickets* section auto-runs on load. Ranked client-side
-  (keyword Jaccard + same-tracker bonus) it keeps up to **10** matches
-  and shows the top **5** by default; a **See more (N)** button reveals
-  the rest. Each row shows `#id · Tracker · match%` + a 2-line subject +
+  on **subject overlap + description overlap + a same-tracker bonus**, it
+  scans up to **100** closed tickets and shows the top **5** by default;
+  a **See more** button reveals the next batch, then scrolling to the
+  bottom of the list loads 10 more at a time until everything ranked is
+  shown. Each row shows `#id · Tracker · match%` + a 2-line subject +
   the closed version, and results open in a new tab so your current
   ticket stays put. Cached per issue and signed by `subject|tracker` so
   a rename auto-invalidates it; a **Refresh** button re-runs the search

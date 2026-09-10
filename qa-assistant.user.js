@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      7.2.5
+// @version      7.2.6
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -1731,10 +1731,11 @@ As a <role>, I want <goal> so that <benefit>.
     // Similar closed tickets (issue detail pages)
     //////////////////////////////////////////////////////
 
-    const SIMILAR_CACHE_KEY       = "qa.similar.v1";
+    const SIMILAR_CACHE_KEY       = "qa.similar.v2";
     const SIMILAR_CACHE_MAX       = 500;
-    const SIMILAR_RESULT_LIMIT    = 10;
+    const SIMILAR_RESULT_LIMIT    = 100;
     const SIMILAR_INITIAL_VISIBLE = 5;
+    const SIMILAR_PAGE_SIZE       = 10;
     // Empirically: 0.10 catches partial reworded matches while still filtering
     // one-token coincidences ("login" alone etc.).
     const SIMILAR_MIN_SCORE       = 0.10;
@@ -1809,7 +1810,10 @@ As a <role>, I want <goal> so that <benefit>.
             return el ? el.textContent.trim().replace(/\s+/g, " ") : "";
         };
 
-        return { id: idMatch[1], subject: subject, tracker: readAttr("tracker") };
+        const descEl = document.querySelector(".description .wiki") || document.querySelector("#issue_description_wiki");
+        const description = descEl ? (descEl.innerText || descEl.textContent || "").trim() : "";
+
+        return { id: idMatch[1], subject: subject, tracker: readAttr("tracker"), description: description };
     }
 
     // The raw Redmine slug the URL uses — projectKeyFromBodyClass() maps
@@ -1826,6 +1830,7 @@ As a <role>, I want <goal> so that <benefit>.
         const tokens = similarTokens(current.subject);
         if (tokens.length < 2) return { results: [], keywords: [] };
         const keywords = similarKeywords(tokens);
+        const descTokens = similarTokens(current.description);
 
         const basePath = projectSlug
             ? ("/projects/" + encodeURIComponent(projectSlug) + "/issues")
@@ -1841,10 +1846,11 @@ As a <role>, I want <goal> so that <benefit>.
         params.append("c[]", "tracker");
         params.append("c[]", "status");
         params.append("c[]", "subject");
+        params.append("c[]", "description");
         params.append("c[]", "updated_on");
         params.append("c[]", "cf_" + CLOSED_VERSION_CF_ID);
         params.append("sort", "updated_on:desc");
-        params.append("per_page", "80");
+        params.append("per_page", "100");
 
         const url = basePath + "?" + params.toString();
         console.info("[QA Assistant] Similar closed tickets — GET", url);
@@ -1868,10 +1874,18 @@ As a <role>, I want <goal> so that <benefit>.
             if (tracker.toLowerCase() === "test case") return;
             const status = ((tr.querySelector("td.status") || {}).textContent || "").trim();
             const closedVersion = ((tr.querySelector("td.cf_" + CLOSED_VERSION_CF_ID) || {}).textContent || "").trim();
+            // Description renders as its own row right after the issue row
+            // (no id of its own) rather than a <td> inside the row itself.
+            const descRow = tr.nextElementSibling;
+            const descText = (descRow && !/^issue-/.test(descRow.id || ""))
+                ? ((descRow.querySelector(".wiki") || descRow).textContent || "").trim()
+                : "";
             const candTokens = similarTokens(subject);
+            const candDescTokens = similarTokens(descText);
             const jacc = similarJaccard(tokens, candTokens);
+            const descJacc = similarJaccard(descTokens, candDescTokens);
             const trackerBoost = (currentTracker && tracker.toLowerCase() === currentTracker) ? 0.3 : 0;
-            const score = jacc * 0.7 + trackerBoost;
+            const score = jacc * 0.55 + descJacc * 0.15 + trackerBoost;
             if (score < SIMILAR_MIN_SCORE) return;
             candidates.push({ id, subject, tracker, status, closedVersion, score });
         });
@@ -3463,6 +3477,11 @@ As a <role>, I want <goal> so that <benefit>.
             const similarMore      = panel.querySelector("#qa-similar-more");
             const similarMoreLbl   = panel.querySelector("#qa-similar-more-label");
 
+            // Full ranked result set + how many rows are currently rendered —
+            // drives the "See more" click and the scroll-triggered loads below.
+            let similarAllResults   = [];
+            let similarVisibleCount = 0;
+
             function similarShowStatus(text, spinner) {
                 if (!similarStatus) return;
                 similarStatus.hidden = false;
@@ -3477,37 +3496,49 @@ As a <role>, I want <goal> so that <benefit>.
                 if (similarList)   { similarList.hidden = true; similarList.innerHTML = ""; }
                 if (similarEmpty)  similarEmpty.hidden = false;
             }
-            function similarRenderResults(results) {
-                if (!similarList) return;
-                if (!results || !results.length) { similarShowEmpty(); return; }
-                if (similarStatus) similarStatus.hidden = true;
-                if (similarEmpty)  similarEmpty.hidden  = true;
-                similarList.classList.remove("qa-similar-expanded");
-                similarList.innerHTML = results.map((r, i) => {
-                    const pct = Math.round(r.score * 100);
-                    const trackerCls = "qa-similar-badge qa-similar-tracker-" + String(r.tracker || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-                    const href = REDMINE + "/issues/" + r.id;
-                    const meta = r.closedVersion ? ("Closed in " + escapeText(r.closedVersion)) : "Closed";
-                    const extraCls = i >= SIMILAR_INITIAL_VISIBLE ? " qa-similar-item-extra" : "";
-                    return `
-                        <li class="qa-similar-item${extraCls}">
+            function similarItemHtml(r) {
+                const pct = Math.round(r.score * 100);
+                const trackerCls = "qa-similar-badge qa-similar-tracker-" + String(r.tracker || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+                const href = REDMINE + "/issues/" + r.id;
+                const meta = r.closedVersion ? ("Closed in " + escapeText(r.closedVersion)) : "Closed";
+                return `
+                        <li class="qa-similar-item">
                             <a href="${href}" target="_blank" rel="noopener" title="${escapeText(r.subject)}">
                                 <span class="qa-similar-row-top">
                                     <span class="qa-similar-id">#${escapeText(r.id)}</span>
                                     <span class="${trackerCls}">${escapeText(r.tracker || "")}</span>
-                                    <span class="qa-similar-score" title="${pct}% keyword overlap">${pct}%</span>
+                                    <span class="qa-similar-score" title="${pct}% match">${pct}%</span>
                                 </span>
                                 <span class="qa-similar-subject">${escapeText(r.subject)}</span>
                                 <span class="qa-similar-meta">${meta}</span>
                             </a>
                         </li>`;
-                }).join("");
+            }
+            // Appends the next `amount` not-yet-rendered results to the list.
+            function similarRevealMore(amount) {
+                const start = similarVisibleCount;
+                const end = Math.min(start + amount, similarAllResults.length);
+                if (end <= start) return;
+                similarList.insertAdjacentHTML("beforeend", similarAllResults.slice(start, end).map(similarItemHtml).join(""));
+                similarVisibleCount = end;
+            }
+            function similarRenderResults(results) {
+                if (!similarList) return;
+                similarAllResults   = results || [];
+                similarVisibleCount = 0;
+                if (!similarAllResults.length) { similarShowEmpty(); return; }
+                if (similarStatus) similarStatus.hidden = true;
+                if (similarEmpty)  similarEmpty.hidden  = true;
+                similarList.innerHTML = "";
+                similarList.scrollTop = 0;
                 similarList.hidden = false;
-
-                const extras = Math.max(0, results.length - SIMILAR_INITIAL_VISIBLE);
+                similarRevealMore(SIMILAR_INITIAL_VISIBLE);
+                // The button only ever offers the first expansion (5 → 10);
+                // everything past that loads by scrolling the list itself.
+                const firstBatchRemaining = Math.min(SIMILAR_PAGE_SIZE, similarAllResults.length) - similarVisibleCount;
                 if (similarMore) {
-                    similarMore.hidden = extras === 0;
-                    if (similarMoreLbl) similarMoreLbl.textContent = extras ? ("See more (" + extras + ")") : "See more";
+                    similarMore.hidden = firstBatchRemaining <= 0;
+                    if (similarMoreLbl) similarMoreLbl.textContent = "See more (" + firstBatchRemaining + ")";
                 }
             }
 
@@ -3554,9 +3585,16 @@ As a <role>, I want <goal> so that <benefit>.
             }
             if (similarRefresh) similarRefresh.addEventListener("click", () => runSimilarSearch(true));
             if (similarMore) similarMore.addEventListener("click", () => {
-                const expanded = similarList.classList.toggle("qa-similar-expanded");
-                const extras = similarList.querySelectorAll(".qa-similar-item-extra").length;
-                if (similarMoreLbl) similarMoreLbl.textContent = expanded ? "See fewer" : ("See more (" + extras + ")");
+                similarRevealMore(SIMILAR_PAGE_SIZE - SIMILAR_INITIAL_VISIBLE);
+                similarMore.hidden = true;
+            });
+            // Infinite-scroll: once the button's first batch is exhausted,
+            // reaching the bottom of the (now internally-scrolling) list loads
+            // the next page of already-fetched, already-ranked results.
+            if (similarList) similarList.addEventListener("scroll", () => {
+                if (similarVisibleCount >= similarAllResults.length) return;
+                const nearBottom = similarList.scrollTop + similarList.clientHeight >= similarList.scrollHeight - 24;
+                if (nearBottom) similarRevealMore(SIMILAR_PAGE_SIZE);
             });
             if (similarWrap && isIssueDetailPage()) {
                 similarWrap.hidden = false;
@@ -7598,9 +7636,11 @@ body.qa-selecting .agile-issue{
     display:flex;
     flex-direction:column;
     gap:6px;
+    max-height:320px;
+    overflow-y:auto;
+    overscroll-behavior:contain;
 }
 .qa-similar-list[hidden]{ display:none; }
-.qa-similar-list:not(.qa-similar-expanded) .qa-similar-item-extra{ display:none; }
 .qa-similar-item a{
     display:flex;
     flex-direction:column;
