@@ -2346,6 +2346,193 @@ body.qa-selecting .agile-issue{
     color:#444;
 }
 
+/* ---------- Attachment lightbox (issue detail pages) ----------
+   Lives outside #qa-panel scope — pure static styling. Intercepts clicks
+   on image/video attachment links so users can flip through them without
+   leaving the issue detail page. */
+.qa-lightbox-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.82);
+    z-index:2147483647;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:40px;
+    opacity:0;
+    transition:opacity .15s ease;
+}
+.qa-lightbox-overlay[hidden]{ display:none; }
+.qa-lightbox-overlay.qa-lightbox-open-state{ opacity:1; }
+.qa-lightbox-stage{
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:12px;
+    max-width:100%;
+    max-height:100%;
+}
+.qa-lightbox-media{
+    position:relative;
+    display:grid;
+    place-items:center;
+    max-width:calc(100vw - 40px);
+    max-height:calc(100vh - 40px);
+    overflow:hidden;
+    cursor:default;
+}
+.qa-lightbox-media.qa-lightbox-zoomed{ cursor:grab; }
+.qa-lightbox-media.qa-lightbox-zoomed.qa-lightbox-dragging{ cursor:grabbing; }
+.qa-lightbox-zoomable{
+    display:grid;
+    place-items:center;
+    width:100%;
+    height:100%;
+    will-change:transform;
+}
+.qa-lightbox-zoomable img,
+.qa-lightbox-zoomable video{
+    grid-area:1 / 1;
+    width:100%;
+    height:100%;
+    object-fit:contain;
+    border-radius:6px;
+    box-shadow:0 12px 40px rgba(0,0,0,.5);
+    display:block;
+    pointer-events:none;
+}
+/* Instant, already-cached thumbnail shown blurred while the full-res image
+   decodes off-screen, then cross-faded out — see qaLightboxShow(). */
+.qa-lightbox-placeholder{
+    filter:blur(6px) brightness(0.85);
+    transform:scale(1.03);
+}
+.qa-lightbox-full{
+    opacity:0;
+    transition:opacity .22s ease;
+}
+.qa-lightbox-full.qa-lightbox-full-in{ opacity:1; }
+.qa-lightbox-media.qa-lightbox-loading::after{
+    content:"";
+    position:absolute;
+    top:50%;
+    left:50%;
+    width:28px;
+    height:28px;
+    margin:-14px 0 0 -14px;
+    border-radius:50%;
+    border:3px solid rgba(255,255,255,.25);
+    border-top-color:#fff;
+    animation:qa-lightbox-spin .7s linear infinite;
+    pointer-events:none;
+}
+@keyframes qa-lightbox-spin{ to{ transform:rotate(360deg); } }
+.qa-lightbox-close{
+    position:absolute;
+    top:-36px;
+    right:-8px;
+    width:32px;
+    height:32px;
+    border:0;
+    border-radius:50%;
+    background:rgba(255,255,255,.12);
+    color:#fff;
+    font-size:20px;
+    line-height:1;
+    cursor:pointer;
+    transition:background .15s ease;
+}
+.qa-lightbox-close:hover{ background:rgba(255,255,255,.24); }
+.qa-lightbox-nav{
+    position:absolute;
+    top:50%;
+    transform:translateY(-50%);
+    width:44px;
+    height:44px;
+    border:0;
+    border-radius:50%;
+    background:rgba(255,255,255,.12);
+    color:#fff;
+    font-size:26px;
+    line-height:1;
+    cursor:pointer;
+    transition:background .15s ease;
+}
+.qa-lightbox-nav:hover{ background:rgba(255,255,255,.24); }
+.qa-lightbox-nav[hidden]{ display:none; }
+.qa-lightbox-prev{ left:-56px; }
+.qa-lightbox-next{ right:-56px; }
+/* Fixed to the viewport (not the stage) so it stays put regardless of how
+   big the media box grows/shrinks with zoom. */
+.qa-lightbox-caption{
+    position:fixed;
+    left:50%;
+    bottom:18px;
+    transform:translateX(-50%);
+    display:flex;
+    align-items:center;
+    gap:12px;
+    color:#eee;
+    font-size:13px;
+    max-width:min(90vw, 1100px);
+    width:max-content;
+    padding:8px 16px;
+    background:rgba(20,20,20,.78);
+    border-radius:10px;
+    z-index:1;
+}
+.qa-lightbox-name{
+    flex:1 1 auto;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.qa-lightbox-zoom-controls{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex:0 0 auto;
+}
+.qa-lightbox-zoom-controls[hidden]{ display:none; }
+.qa-lightbox-zoom-controls button{
+    width:22px;
+    height:22px;
+    border:0;
+    border-radius:50%;
+    background:rgba(255,255,255,.14);
+    color:#fff;
+    font-size:15px;
+    line-height:1;
+    cursor:pointer;
+    transition:background .15s ease;
+}
+.qa-lightbox-zoom-controls button:hover{ background:rgba(255,255,255,.26); }
+.qa-lightbox-zoom-controls button:disabled{ opacity:.4; cursor:default; }
+.qa-lightbox-zoom-level{
+    min-width:36px;
+    text-align:center;
+    font-variant-numeric:tabular-nums;
+    font-size:11px;
+    color:#ccc;
+}
+.qa-lightbox-open{
+    color:#8ab4ff;
+    text-decoration:none;
+    flex:0 0 auto;
+}
+.qa-lightbox-open:hover{ text-decoration:underline; }
+@media (max-width: 900px){
+    .qa-lightbox-prev{ left:4px; }
+    .qa-lightbox-next{ right:4px; }
+}
+@media (prefers-reduced-motion: reduce){
+    .qa-lightbox-overlay{ transition:none; }
+    .qa-lightbox-full{ transition:none; }
+    .qa-lightbox-media.qa-lightbox-loading::after{ animation:none; }
+}
+
 /* Sprint audit modal (v7.2.0). Mirrors the reopened-issues modal chrome
    and adds section-based report styling. */
 #qa-audit-modal .qa-modal.qa-audit-modal{

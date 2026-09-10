@@ -5,7 +5,116 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.9 — current
+## Version 7.2.16 — current
+
+### 📌 Attachment lightbox — caption bar anchored to the bottom
+The name / zoom controls / "Open original" row used to sit directly under
+the image, so it moved up and down as the box grew or shrank with zoom.
+It's now pinned to a fixed spot at the bottom of the screen regardless of
+image size or zoom level.
+
+---
+
+## Version 7.2.15
+
+### 🪲 Fixed: lightbox zoom still wasn't growing the viewer
+7.2.14's box-growth logic used the same size for both "default box" and
+"max growth ceiling" — for any image that already needed to shrink to fit
+at 100% (true of most full-size screenshots), those two values were
+mathematically forced equal, leaving zero room for the box to grow before
+falling straight back to the old scale+pan behavior.
+
+- 🔧 Split into two distinct tiers: a cosy **default** size (unchanged from
+  before) and a much larger **hard ceiling** near the full viewport. The
+  box now visibly grows from the default toward that ceiling as you zoom,
+  before falling back to scale+pan once truly maxed out.
+- Raised the CSS `max-width`/`max-height` safety net to match, so it no
+  longer silently clamped the box back down to the old default size.
+
+---
+
+## Version 7.2.14
+
+### 🔍 Attachment lightbox — zoom grows the viewer, not just the image
+Zooming previously just scaled the image inside a fixed-size box, so most
+of the zoomed-in image was immediately clipped.
+
+- 📐 The viewer box itself now **grows with zoom** (up to the available
+  screen space) so more of the image becomes visible as you zoom in —
+  matching how most photo viewers behave.
+- Once the box is maxed out at the viewport's limits, further zoom scales
+  the image within that maxed box and drag-to-pan takes over, exactly as
+  before.
+- Resizing the browser window while zoomed re-evaluates how big the box
+  can grow.
+
+---
+
+## Version 7.2.13
+
+### 🔍 Attachment lightbox — zoom
+The lightbox had no way to inspect fine detail in a screenshot.
+
+- ➕ ➖ **Zoom in / out buttons** in the caption bar (100%–500%), plus **+/−**
+  keyboard shortcuts.
+- 🖱 **Mouse wheel** zooms in/out over the image.
+- ✋ **Drag to pan** once zoomed in — panning is clamped so the image can't
+  be dragged fully off-screen.
+- 🖱️ **Double-click** resets zoom back to 100%.
+- Zoom resets automatically when navigating to a different attachment or
+  closing the lightbox. Not shown for video attachments, which use their
+  own native player controls.
+
+---
+
+## Version 7.2.12
+
+### 🖼 Attachment lightbox — smoother image loading
+Large screenshots opened in the lightbox visibly painted in bands (10% →
+20% → … → 100%) while the full-resolution file streamed in.
+
+- ⚡ The already-cached thumbnail now shows instantly, blurred, while the
+  full-resolution image decodes off-screen — no more watching the image
+  paint in visible bands.
+- ✨ Once fully decoded, the sharp image cross-fades in over the blurred
+  placeholder instead of popping in abruptly.
+- 🌀 A small spinner covers any gap where no cached thumbnail exists yet.
+
+---
+
+## Version 7.2.11
+
+### 🖼 Attachment lightbox
+Clicking an image or video attachment on an issue detail page used to
+navigate the whole tab to a new URL — getting back to the ticket meant
+hitting Back, which got old fast with multiple attachments.
+
+- 🖼 Clicking an **image or video** attachment (list, thumbnail grid, or a
+  "File added" journal entry) now opens it in an in-page preview overlay
+  instead of navigating away.
+- ◀▶ **Prev / Next** buttons (and ←/→ keys) cycle through every
+  image/video attachment on the ticket without closing the preview.
+- ⎋ Esc or clicking the backdrop closes it; an **Open original** link is
+  always available.
+- 📄 Other attachment types (PDF, docx, zip, …) are untouched — they still
+  open/download exactly as before.
+
+---
+
+## Version 7.2.10
+
+### 🪲 Fixed: "Show all" did nothing when there were zero close matches
+When a ticket had no matches above the relevance bar, the list container
+itself stayed hidden (an empty-state message showed instead). Clicking
+**Show N more (low relevance)** appended the low-relevance rows into that
+still-hidden list, so nothing appeared to happen.
+
+- 🔄 The button now un-hides the list (and hides the empty-state message)
+  before revealing the low-relevance matches, so they actually show up.
+
+---
+
+## Version 7.2.9
 
 ### 🔎 Similar closed tickets — "Show all" control
 The relevance filter (score ≥ 0.10) was an all-or-nothing cut — candidates

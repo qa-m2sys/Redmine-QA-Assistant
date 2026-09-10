@@ -3557,6 +3557,12 @@ As a <role>, I want <goal> so that <benefit>.
             if (similarShowAll) similarShowAll.addEventListener("click", () => {
                 similarShowAllUnlocked = true;
                 similarShowAll.hidden = true;
+                // Zero-relevant-match state leaves the list itself hidden
+                // (empty-state message shown instead) — surface it now.
+                if (similarList.hidden) {
+                    similarList.hidden = false;
+                    if (similarEmpty) similarEmpty.hidden = true;
+                }
                 similarRevealMore(SIMILAR_PAGE_SIZE);
             });
             // Infinite-scroll: once the current batch (relevant matches, or the
@@ -5593,6 +5599,349 @@ As a <role>, I want <goal> so that <benefit>.
     }
 
     //////////////////////////////////////////////////////
+    // Attachment lightbox (issue detail pages)
+    //////////////////////////////////////////////////////
+
+    const ATTACHMENT_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+    const ATTACHMENT_VIDEO_EXT_RE = /\.(mp4|mov|webm|ogv|ogg|avi|mkv|m4v)$/i;
+    const ATTACHMENT_LINK_SELECTOR = ".attachments p a.icon-attachment, .attachments .thumbnails a, #history a[href*='/attachments/']";
+
+    function attachmentTypeFromHref(href) {
+        const name = decodeURIComponent((href || "").split("/").pop() || "").split("?")[0];
+        if (ATTACHMENT_IMAGE_EXT_RE.test(name)) return { type: "image", name: name };
+        if (ATTACHMENT_VIDEO_EXT_RE.test(name)) return { type: "video", name: name };
+        return null;
+    }
+
+    // Every previewable attachment on the page, de-duped by id (the same
+    // file is usually linked twice — list + thumbnail) so Prev/Next hits
+    // each one exactly once.
+    function collectAttachmentItems() {
+        const seen = new Set();
+        const items = [];
+        document.querySelectorAll(ATTACHMENT_LINK_SELECTOR).forEach(a => {
+            const href = a.getAttribute("href") || "";
+            const m = href.match(/\/attachments\/(?:download\/)?(\d+)\b/);
+            if (!m) return;
+            const id = m[1];
+            if (seen.has(id)) return;
+            const info = attachmentTypeFromHref(href);
+            if (!info) return;
+            seen.add(id);
+            items.push({
+                id: id, href: toRedmineAbs(href), name: info.name, type: info.type,
+                // Redmine always generates this — used as an instant blurred
+                // placeholder while the full-res image loads (see qaLightboxShow).
+                thumbHref: info.type === "image" ? toRedmineAbs("/attachments/thumbnail/" + id) : null
+            });
+        });
+        return items;
+    }
+
+    let qaLightboxEl = null;
+    let qaLightboxItems = [];
+    let qaLightboxIndex = 0;
+    let qaLightboxZoom = 1;
+    let qaLightboxPanX = 0;
+    let qaLightboxPanY = 0;
+    let qaLightboxDragging = false;
+    let qaLightboxDragStartX = 0;
+    let qaLightboxDragStartY = 0;
+    let qaLightboxPanStartX = 0;
+    let qaLightboxPanStartY = 0;
+    // Natural size of the current image fitted to the default viewer box at
+    // zoom 1 (i.e. what the plain <img> would render at). Drives how far the
+    // box itself can grow before zoom has to fall back to scale+pan.
+    let qaLightboxBaseW = 0;
+    let qaLightboxBaseH = 0;
+    const LIGHTBOX_ZOOM_MIN = 1;
+    const LIGHTBOX_ZOOM_MAX = 5;
+    const LIGHTBOX_ZOOM_STEP = 0.5;
+    const LIGHTBOX_ZOOM_WHEEL_STEP = 0.2;
+
+    // Two tiers: "comfort" is the cosy default box a plain <img> would fit
+    // into at zoom 1 (unchanged from before); "hard" is the true ceiling —
+    // near-fullscreen — the box is allowed to grow into as zoom increases.
+    // Using the SAME value for both would make zoomAtMax collapse to ~1 for
+    // any image that already needs to shrink to fit at 100% (the common
+    // case for full-size screenshots), leaving no visible room to grow.
+    function qaLightboxLimits() {
+        return {
+            comfortW: Math.min(window.innerWidth * 0.9, 1100),
+            comfortH: Math.max(120, window.innerHeight - 140),
+            hardW: Math.max(200, window.innerWidth - 160),
+            hardH: Math.max(200, window.innerHeight - 160)
+        };
+    }
+
+    // Figures out how much the viewer box itself can grow for the current
+    // zoom level before it's maxed out at the available viewport space —
+    // past that point the box stays maxed and the image scales+pans inside it.
+    function qaLightboxGeometry() {
+        const lim = qaLightboxLimits();
+        if (!qaLightboxBaseW || !qaLightboxBaseH) {
+            return { boxW: lim.comfortW, boxH: lim.comfortH, overflowFactor: 1, known: false };
+        }
+        const zoomAtMax = Math.max(LIGHTBOX_ZOOM_MIN, Math.min(lim.hardW / qaLightboxBaseW, lim.hardH / qaLightboxBaseH));
+        if (qaLightboxZoom <= zoomAtMax) {
+            return { boxW: qaLightboxBaseW * qaLightboxZoom, boxH: qaLightboxBaseH * qaLightboxZoom, overflowFactor: 1, known: true };
+        }
+        return {
+            boxW: Math.min(qaLightboxBaseW * zoomAtMax, lim.hardW),
+            boxH: Math.min(qaLightboxBaseH * zoomAtMax, lim.hardH),
+            overflowFactor: qaLightboxZoom / zoomAtMax,
+            known: true
+        };
+    }
+
+    // Reads the loaded image/video's natural size and derives its zoom-1 fit
+    // size against the default (comfort) box — the starting point
+    // qaLightboxGeometry() grows from. Re-applies the current transform once known.
+    function qaLightboxCaptureBase(el) {
+        const nw = el.naturalWidth || el.videoWidth || 0;
+        const nh = el.naturalHeight || el.videoHeight || 0;
+        if (!nw || !nh) return;
+        const lim = qaLightboxLimits();
+        const fit = Math.min(1, lim.comfortW / nw, lim.comfortH / nh);
+        qaLightboxBaseW = nw * fit;
+        qaLightboxBaseH = nh * fit;
+        qaLightboxApplyTransform();
+    }
+
+    // Reflects zoom/pan state onto the box size, transformed layer, and
+    // button/label states. The box (.qa-lightbox-media) grows with zoom up
+    // to the available viewport, then further zoom scales+pans the content.
+    function qaLightboxApplyTransform() {
+        if (!qaLightboxEl) return;
+        const media = qaLightboxEl.querySelector(".qa-lightbox-media");
+        const layer = qaLightboxEl.querySelector(".qa-lightbox-zoomable");
+        const geo = qaLightboxGeometry();
+        if (media) {
+            // Always set explicit px so the CSS max-width/max-height (a pure
+            // safety net) never clamps growth past the old "comfort" size.
+            media.style.width  = Math.round(geo.boxW) + "px";
+            media.style.height = Math.round(geo.boxH) + "px";
+            media.classList.toggle("qa-lightbox-zoomed", geo.known && geo.overflowFactor > 1);
+        }
+        if (layer) layer.style.transform = "translate(" + qaLightboxPanX + "px, " + qaLightboxPanY + "px) scale(" + geo.overflowFactor + ")";
+        const label = qaLightboxEl.querySelector(".qa-lightbox-zoom-level");
+        if (label) label.textContent = Math.round(qaLightboxZoom * 100) + "%";
+        const zoomOutBtn = qaLightboxEl.querySelector(".qa-lightbox-zoom-out");
+        const zoomInBtn  = qaLightboxEl.querySelector(".qa-lightbox-zoom-in");
+        if (zoomOutBtn) zoomOutBtn.disabled = qaLightboxZoom <= LIGHTBOX_ZOOM_MIN;
+        if (zoomInBtn)  zoomInBtn.disabled  = qaLightboxZoom >= LIGHTBOX_ZOOM_MAX;
+    }
+
+    // Keeps pan within the overflowing content's bounds — a no-op while the
+    // box itself is still growing (nothing overflows it yet).
+    function qaLightboxClampPan() {
+        const geo = qaLightboxGeometry();
+        if (!geo.known || geo.overflowFactor <= 1) { qaLightboxPanX = 0; qaLightboxPanY = 0; return; }
+        const maxX = Math.max(0, (geo.boxW * geo.overflowFactor - geo.boxW) / 2);
+        const maxY = Math.max(0, (geo.boxH * geo.overflowFactor - geo.boxH) / 2);
+        qaLightboxPanX = Math.min(maxX, Math.max(-maxX, qaLightboxPanX));
+        qaLightboxPanY = Math.min(maxY, Math.max(-maxY, qaLightboxPanY));
+    }
+
+    function qaLightboxSetZoom(zoom) {
+        qaLightboxZoom = Math.min(LIGHTBOX_ZOOM_MAX, Math.max(LIGHTBOX_ZOOM_MIN, zoom));
+        if (qaLightboxZoom === LIGHTBOX_ZOOM_MIN) { qaLightboxPanX = 0; qaLightboxPanY = 0; }
+        qaLightboxClampPan();
+        qaLightboxApplyTransform();
+    }
+
+    function qaLightboxResetZoom() {
+        qaLightboxZoom = 1; qaLightboxPanX = 0; qaLightboxPanY = 0;
+        qaLightboxApplyTransform();
+    }
+
+    function qaLightboxShow(idx) {
+        if (!qaLightboxItems.length || !qaLightboxEl) return;
+        qaLightboxIndex = (idx + qaLightboxItems.length) % qaLightboxItems.length;
+        const item = qaLightboxItems[qaLightboxIndex];
+        const media = qaLightboxEl.querySelector(".qa-lightbox-media");
+        media.innerHTML = "";
+        media.classList.remove("qa-lightbox-loading");
+        qaLightboxBaseW = 0;
+        qaLightboxBaseH = 0;
+
+        // Everything visible for this item lives inside .qa-lightbox-zoomable,
+        // which is what the zoom/pan transform is actually applied to.
+        const zoomable = document.createElement("div");
+        zoomable.className = "qa-lightbox-zoomable";
+        media.appendChild(zoomable);
+        qaLightboxResetZoom();
+
+        if (item.type === "video") {
+            const v = document.createElement("video");
+            v.src = item.href; v.controls = true; v.autoplay = true;
+            zoomable.appendChild(v);
+        } else {
+            // Paint the already-cached thumbnail immediately (blurred) while the
+            // full-resolution image decodes off-screen, then cross-fade — avoids
+            // watching a large image paint in visible bands on a slow connection.
+            media.classList.add("qa-lightbox-loading");
+            let placeholder = null;
+            if (item.thumbHref) {
+                placeholder = document.createElement("img");
+                placeholder.className = "qa-lightbox-placeholder";
+                placeholder.alt = "";
+                placeholder.onload = () => qaLightboxCaptureBase(placeholder);
+                placeholder.src = item.thumbHref;
+                zoomable.appendChild(placeholder);
+            }
+            const full = new Image();
+            full.className = "qa-lightbox-full";
+            full.alt = item.name;
+            const finish = () => {
+                if (zoomable.querySelector(".qa-lightbox-full") !== full) return; // stale — user already navigated
+                media.classList.remove("qa-lightbox-loading");
+                if (placeholder) placeholder.remove();
+                full.classList.add("qa-lightbox-full-in");
+            };
+            full.onload = () => {
+                qaLightboxCaptureBase(full); // authoritative size — supersedes the thumbnail estimate
+                if (full.decode) full.decode().then(finish).catch(finish); else finish();
+            };
+            full.onerror = () => { media.classList.remove("qa-lightbox-loading"); };
+            full.src = item.href;
+            zoomable.appendChild(full);
+        }
+        const multi = qaLightboxItems.length > 1;
+        qaLightboxEl.querySelector(".qa-lightbox-name").textContent = item.name
+            + (multi ? " (" + (qaLightboxIndex + 1) + "/" + qaLightboxItems.length + ")" : "");
+        qaLightboxEl.querySelector(".qa-lightbox-open").href = item.href;
+        qaLightboxEl.querySelector(".qa-lightbox-prev").hidden = !multi;
+        qaLightboxEl.querySelector(".qa-lightbox-next").hidden = !multi;
+        // Zoom doesn't apply to video — it has its own native controls.
+        const zoomControls = qaLightboxEl.querySelector(".qa-lightbox-zoom-controls");
+        if (zoomControls) zoomControls.hidden = item.type === "video";
+    }
+
+    function qaLightboxClose() {
+        if (!qaLightboxEl) return;
+        qaLightboxEl.classList.remove("qa-lightbox-open-state");
+        qaLightboxEl.hidden = true;
+        qaLightboxEl.querySelector(".qa-lightbox-media").innerHTML = "";
+        qaLightboxItems = [];
+        qaLightboxZoom = 1; qaLightboxPanX = 0; qaLightboxPanY = 0; qaLightboxDragging = false;
+        qaLightboxBaseW = 0; qaLightboxBaseH = 0;
+    }
+
+    function qaLightboxEnsure() {
+        if (qaLightboxEl) return qaLightboxEl;
+        const overlay = document.createElement("div");
+        overlay.className = "qa-lightbox-overlay";
+        overlay.hidden = true;
+        overlay.innerHTML =
+            '<div class="qa-lightbox-stage">'
+            +   '<button type="button" class="qa-lightbox-close" aria-label="Close">\u00d7</button>'
+            +   '<button type="button" class="qa-lightbox-nav qa-lightbox-prev" aria-label="Previous">\u2039</button>'
+            +   '<div class="qa-lightbox-media"></div>'
+            +   '<button type="button" class="qa-lightbox-nav qa-lightbox-next" aria-label="Next">\u203a</button>'
+            +   '<div class="qa-lightbox-caption">'
+            +     '<span class="qa-lightbox-name"></span>'
+            +     '<span class="qa-lightbox-zoom-controls">'
+            +       '<button type="button" class="qa-lightbox-zoom-out" aria-label="Zoom out" title="Zoom out">\u2212</button>'
+            +       '<span class="qa-lightbox-zoom-level">100%</span>'
+            +       '<button type="button" class="qa-lightbox-zoom-in" aria-label="Zoom in" title="Zoom in">+</button>'
+            +     '</span>'
+            +     '<a class="qa-lightbox-open" target="_blank" rel="noopener">Open original</a>'
+            +   '</div>'
+            + '</div>';
+        document.body.appendChild(overlay);
+        qaLightboxEl = overlay;
+        const media = overlay.querySelector(".qa-lightbox-media");
+
+        overlay.querySelector(".qa-lightbox-close").addEventListener("click", qaLightboxClose);
+        overlay.addEventListener("click", (e) => { if (e.target === overlay) qaLightboxClose(); });
+        overlay.querySelector(".qa-lightbox-prev").addEventListener("click", () => qaLightboxShow(qaLightboxIndex - 1));
+        overlay.querySelector(".qa-lightbox-next").addEventListener("click", () => qaLightboxShow(qaLightboxIndex + 1));
+        overlay.querySelector(".qa-lightbox-zoom-in").addEventListener("click", () => qaLightboxSetZoom(qaLightboxZoom + LIGHTBOX_ZOOM_STEP));
+        overlay.querySelector(".qa-lightbox-zoom-out").addEventListener("click", () => qaLightboxSetZoom(qaLightboxZoom - LIGHTBOX_ZOOM_STEP));
+        document.addEventListener("keydown", (e) => {
+            if (qaLightboxEl.hidden) return;
+            if (e.key === "Escape") qaLightboxClose();
+            else if (e.key === "ArrowLeft") qaLightboxShow(qaLightboxIndex - 1);
+            else if (e.key === "ArrowRight") qaLightboxShow(qaLightboxIndex + 1);
+            else if (e.key === "+" || e.key === "=") qaLightboxSetZoom(qaLightboxZoom + LIGHTBOX_ZOOM_STEP);
+            else if (e.key === "-") qaLightboxSetZoom(qaLightboxZoom - LIGHTBOX_ZOOM_STEP);
+        });
+
+        // Mouse wheel zooms in/out around the image's own center. Videos use
+        // their native controls, so wheel/drag/double-click are skipped for them.
+        media.addEventListener("wheel", (e) => {
+            const current = qaLightboxItems[qaLightboxIndex];
+            if (!current || current.type === "video") return;
+            e.preventDefault();
+            qaLightboxSetZoom(qaLightboxZoom + (e.deltaY < 0 ? LIGHTBOX_ZOOM_WHEEL_STEP : -LIGHTBOX_ZOOM_WHEEL_STEP));
+        }, { passive: false });
+
+        // Drag to pan — only meaningful once the box is maxed out and the
+        // content itself is overflowing it (see qaLightboxGeometry()).
+        media.addEventListener("mousedown", (e) => {
+            const current = qaLightboxItems[qaLightboxIndex];
+            if (!current || current.type === "video") return;
+            if (qaLightboxGeometry().overflowFactor <= 1) return;
+            qaLightboxDragging = true;
+            qaLightboxDragStartX = e.clientX;
+            qaLightboxDragStartY = e.clientY;
+            qaLightboxPanStartX = qaLightboxPanX;
+            qaLightboxPanStartY = qaLightboxPanY;
+            media.classList.add("qa-lightbox-dragging");
+            e.preventDefault();
+        });
+        window.addEventListener("mousemove", (e) => {
+            if (!qaLightboxDragging) return;
+            qaLightboxPanX = qaLightboxPanStartX + (e.clientX - qaLightboxDragStartX);
+            qaLightboxPanY = qaLightboxPanStartY + (e.clientY - qaLightboxDragStartY);
+            qaLightboxClampPan();
+            qaLightboxApplyTransform();
+        });
+        window.addEventListener("mouseup", () => {
+            if (!qaLightboxDragging) return;
+            qaLightboxDragging = false;
+            media.classList.remove("qa-lightbox-dragging");
+        });
+        media.addEventListener("dblclick", () => qaLightboxResetZoom());
+        // Window resize while zoomed re-evaluates how big the box can grow.
+        window.addEventListener("resize", () => {
+            if (!qaLightboxEl || qaLightboxEl.hidden) return;
+            qaLightboxClampPan();
+            qaLightboxApplyTransform();
+        });
+
+        return overlay;
+    }
+
+    function qaLightboxOpen(items, idx) {
+        qaLightboxEnsure();
+        qaLightboxItems = items;
+        qaLightboxEl.hidden = false;
+        requestAnimationFrame(() => qaLightboxEl.classList.add("qa-lightbox-open-state"));
+        qaLightboxShow(idx);
+    }
+
+    // Delegated so it keeps working after Redmine re-renders the attachments
+    // list, with no separate MutationObserver needed.
+    function installAttachmentLightbox() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        document.addEventListener("click", (e) => {
+            const a = e.target.closest(ATTACHMENT_LINK_SELECTOR);
+            if (!a) return;
+            const href = a.getAttribute("href") || "";
+            const info = attachmentTypeFromHref(href);
+            if (!info) return; // not image/video — let it navigate/download as normal
+            e.preventDefault();
+            const items = collectAttachmentItems();
+            const m = href.match(/\/attachments\/(?:download\/)?(\d+)\b/);
+            const idx = Math.max(0, items.findIndex(it => it.id === (m && m[1])));
+            qaLightboxOpen(items, idx);
+        });
+    }
+
+    //////////////////////////////////////////////////////
     // QA Daily Report (Agile board)
     //////////////////////////////////////////////////////
 
@@ -6443,6 +6792,7 @@ As a <role>, I want <goal> so that <benefit>.
         observeChecklistSection();
         observeIssueHeader();
         observeRelatedIssues();
+        installAttachmentLightbox();
         observeBoardDailyReport();
     }
 

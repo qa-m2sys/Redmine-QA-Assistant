@@ -103,6 +103,21 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
   (each row is only annotated once); re-runs automatically if a relation is
   added or removed.
 
+### 🖼 Attachment lightbox
+- On any issue detail page, clicking an **image or video** attachment (in
+  the file list, the thumbnail grid, or a "File added" journal entry) opens
+  it in an in-page preview instead of navigating the tab to a new URL.
+- **Prev / Next** buttons and ←/→ arrow keys cycle through every
+  image/video attachment on the ticket without leaving the preview; Esc or
+  clicking the backdrop closes it, and an **Open original** link is always
+  available.
+- **Zoom** in/out via the +/− buttons, **+/− keys**, or the **mouse wheel**
+  (100%–500%) — the viewer box itself grows with zoom (up to the available
+  screen space) before falling back to scale + drag-to-pan once it's maxed
+  out; double-click resets to 100%. Not shown for video attachments.
+- Other attachment types (PDF, docx, zip, etc.) are unaffected — they still
+  open or download exactly as before.
+
 ### ✅ Close an issue in one click
 - New **"Close this issue"** section that appears on any Redmine issue detail page (`/issues/<n>`).
 - Pick the **Closed Version** from a dropdown that mirrors Redmine's own list (custom field #12), and the panel writes:
