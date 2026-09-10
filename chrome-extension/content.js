@@ -5495,6 +5495,54 @@ As a <role>, I want <goal> so that <benefit>.
         mo.observe(root, { childList: true, subtree: true });
     }
 
+    // Related issues table is native Redmine markup with no author column —
+    // one lightweight JSON fetch per related issue fills it in inline.
+    function mountRelatedIssueAuthors() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        const rows = document.querySelectorAll("#relations table.list.issues tr[id^='relation-']");
+        rows.forEach(tr => {
+            if (tr.dataset.qaAuthor === "1") return;
+            const subjectCell = tr.querySelector("td.subject");
+            const link = subjectCell && subjectCell.querySelector("a.issue[href*='/issues/']");
+            if (!link) return;
+            const m = link.getAttribute("href").match(/\/issues\/(\d+)/);
+            if (!m) return;
+            tr.dataset.qaAuthor = "1";
+            // Plain HTML fetch, not `.json` — Redmine's REST API can answer an
+            // unrecognised session with a Basic-Auth challenge, which pops a
+            // native browser login dialog. An HTML request just redirects.
+            fetch(REDMINE + "/issues/" + m[1], { credentials: "include", headers: { "Accept": "text/html" } })
+                .then(res => res.ok ? res.text() : null)
+                .then(html => {
+                    if (!html || !subjectCell.isConnected) return;
+                    const doc = new DOMParser().parseFromString(html, "text/html");
+                    const authorLink = doc.querySelector(".author a.user");
+                    const author = authorLink ? authorLink.textContent.trim() : "";
+                    if (!author) return;
+                    const span = document.createElement("span");
+                    span.className = "qa-relation-author";
+                    span.append("— ");
+                    const strong = document.createElement("strong");
+                    strong.textContent = author;
+                    span.appendChild(strong);
+                    subjectCell.appendChild(span);
+                })
+                .catch(() => {});
+        });
+    }
+
+    // Redmine re-renders this table via AJAX on add/remove relation.
+    function observeRelatedIssues() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        mountRelatedIssueAuthors();
+        const root = document.getElementById("relations") || document.getElementById("content") || document.body;
+        if (!root) return;
+        const mo = new MutationObserver(() => mountRelatedIssueAuthors());
+        mo.observe(root, { childList: true, subtree: true });
+    }
+
     //////////////////////////////////////////////////////
     // QA Daily Report (Agile board)
     //////////////////////////////////////////////////////
@@ -6345,6 +6393,7 @@ As a <role>, I want <goal> so that <benefit>.
         rememberCurrentBoard();
         observeChecklistSection();
         observeIssueHeader();
+        observeRelatedIssues();
         observeBoardDailyReport();
     }
 

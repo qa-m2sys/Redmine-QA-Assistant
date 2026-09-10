@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      7.2.6
+// @version      7.2.8
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -7728,6 +7728,19 @@ body.qa-selecting .agile-issue{
 .qa-issue-copy-btn:active{ background:rgba(0,0,0,0.09); }
 .qa-issue-copy-btn:focus-visible{ outline:2px solid #4f8cff; outline-offset:2px; }
 
+/* Author name appended to each row of Redmine's native "Related issues"
+   table — fetched separately since that table has no author column. */
+.qa-relation-author{
+    color:#767676;
+    font-size:12px;
+    font-style:italic;
+    margin-left:4px;
+}
+.qa-relation-author strong{
+    font-weight:700;
+    color:#444;
+}
+
 /* ---------- QA Daily Report widget (injected on agile board pages) ---------- */
 /* Lives outside #qa-panel scope — static tokens so it renders correctly on
    Redmine's own light/dark themes without depending on our CSS variables. */
@@ -8477,6 +8490,54 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
         const root = document.getElementById("content") || document.body;
         if (!root) return;
         const mo = new MutationObserver(() => mountIssueLinkCopyButton());
+        mo.observe(root, { childList: true, subtree: true });
+    }
+
+    // Related issues table is native Redmine markup with no author column —
+    // one lightweight JSON fetch per related issue fills it in inline.
+    function mountRelatedIssueAuthors() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        const rows = document.querySelectorAll("#relations table.list.issues tr[id^='relation-']");
+        rows.forEach(tr => {
+            if (tr.dataset.qaAuthor === "1") return;
+            const subjectCell = tr.querySelector("td.subject");
+            const link = subjectCell && subjectCell.querySelector("a.issue[href*='/issues/']");
+            if (!link) return;
+            const m = link.getAttribute("href").match(/\/issues\/(\d+)/);
+            if (!m) return;
+            tr.dataset.qaAuthor = "1";
+            // Plain HTML fetch, not `.json` — Redmine's REST API can answer an
+            // unrecognised session with a Basic-Auth challenge, which pops a
+            // native browser login dialog. An HTML request just redirects.
+            fetch(REDMINE + "/issues/" + m[1], { credentials: "include", headers: { "Accept": "text/html" } })
+                .then(res => res.ok ? res.text() : null)
+                .then(html => {
+                    if (!html || !subjectCell.isConnected) return;
+                    const doc = new DOMParser().parseFromString(html, "text/html");
+                    const authorLink = doc.querySelector(".author a.user");
+                    const author = authorLink ? authorLink.textContent.trim() : "";
+                    if (!author) return;
+                    const span = document.createElement("span");
+                    span.className = "qa-relation-author";
+                    span.append("— ");
+                    const strong = document.createElement("strong");
+                    strong.textContent = author;
+                    span.appendChild(strong);
+                    subjectCell.appendChild(span);
+                })
+                .catch(() => {});
+        });
+    }
+
+    // Redmine re-renders this table via AJAX on add/remove relation.
+    function observeRelatedIssues() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        mountRelatedIssueAuthors();
+        const root = document.getElementById("relations") || document.getElementById("content") || document.body;
+        if (!root) return;
+        const mo = new MutationObserver(() => mountRelatedIssueAuthors());
         mo.observe(root, { childList: true, subtree: true });
     }
 
@@ -9316,6 +9377,7 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
         rememberCurrentBoard();
         observeChecklistSection();
         observeIssueHeader();
+        observeRelatedIssues();
         observeBoardDailyReport();
     }
 

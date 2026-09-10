@@ -94,6 +94,14 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
 - Skeleton chips animate on first load.
 - Test Case tickets are excluded from the count.
 
+### 👤 Related issues — author name
+- On any issue detail page, each row in Redmine's native **Related issues**
+  table gets the linked ticket's author appended inline (e.g. *— Sabbir
+  Ahmed*) — that table normally only shows subject, status, and dates.
+- Fetched per related ticket via its own JSON endpoint and cached in the DOM
+  (each row is only annotated once); re-runs automatically if a relation is
+  added or removed.
+
 ### ✅ Close an issue in one click
 - New **"Close this issue"** section that appears on any Redmine issue detail page (`/issues/<n>`).
 - Pick the **Closed Version** from a dropdown that mirrors Redmine's own list (custom field #12), and the panel writes:

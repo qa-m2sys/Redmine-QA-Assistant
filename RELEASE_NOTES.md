@@ -5,7 +5,36 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.6 — current
+## Version 7.2.8 — current
+
+### 🪲 Fixed: native browser login popup on issue pages
+The new *Related issues — author name* feature (7.2.7) fetched each linked
+ticket via Redmine's `.json` REST endpoint. If the session wasn't recognised
+for that request, Redmine answered with an HTTP Basic-Auth challenge instead
+of a normal redirect — which the browser renders as its own native login
+popup, outside the page entirely.
+
+- 🔄 Switched to fetching the plain HTML issue page (same safe pattern as
+  *Similar closed tickets*) and scraping the author from the page instead.
+  Unauthenticated requests now just redirect like any other page load —
+  no more surprise login dialog on reload.
+
+---
+
+## Version 7.2.7
+
+### 👤 Related issues — author name
+Redmine's native *Related issues* table on an issue detail page never showed
+who filed the linked ticket — only subject, status, and dates.
+
+- ➕ Each row now gets the linked ticket's author appended inline (e.g.
+  *— Sabbir Ahmed*), fetched via that issue's own JSON endpoint.
+- ♻️ Re-runs automatically when a relation is added or removed, since
+  Redmine re-renders the table via AJAX.
+
+---
+
+## Version 7.2.6
 
 ### 🔎 Similar closed tickets — description-aware ranking + infinite scroll
 The similarity ranker only ever looked at ticket subjects, and the result

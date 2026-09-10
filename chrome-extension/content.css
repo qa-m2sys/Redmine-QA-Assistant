@@ -2329,6 +2329,19 @@ body.qa-selecting .agile-issue{
 .qa-issue-copy-btn:active{ background:rgba(0,0,0,0.09); }
 .qa-issue-copy-btn:focus-visible{ outline:2px solid #4f8cff; outline-offset:2px; }
 
+/* Author name appended to each row of Redmine's native "Related issues"
+   table — fetched separately since that table has no author column. */
+.qa-relation-author{
+    color:#767676;
+    font-size:12px;
+    font-style:italic;
+    margin-left:4px;
+}
+.qa-relation-author strong{
+    font-weight:700;
+    color:#444;
+}
+
 /* Sprint audit modal (v7.2.0). Mirrors the reopened-issues modal chrome
    and adds section-based report styling. */
 #qa-audit-modal .qa-modal.qa-audit-modal{
