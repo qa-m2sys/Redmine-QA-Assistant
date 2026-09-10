@@ -5,7 +5,24 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.8 — current
+## Version 7.2.9 — current
+
+### 🔎 Similar closed tickets — "Show all" control
+The relevance filter (score ≥ 0.10) was an all-or-nothing cut — candidates
+below the bar were dropped entirely, even though Redmine's own loose
+keyword search had already fetched them.
+
+- 👁 Below-threshold candidates are now kept (not fetched again — same
+  request) and revealed on demand via a **Show N more (low relevance)**
+  control that appears once every relevant match has been paged through.
+- 🎨 Low-relevance rows render at reduced opacity so they read as
+  secondary without being hidden away.
+- ♻️ Once unlocked, scrolling continues to page through the low-relevance
+  tail the same way it already does for the relevant matches.
+
+---
+
+## Version 7.2.8
 
 ### 🪲 Fixed: native browser login popup on issue pages
 The new *Related issues — author name* feature (7.2.7) fetched each linked

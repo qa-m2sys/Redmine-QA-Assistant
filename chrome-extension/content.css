@@ -2305,7 +2305,11 @@ body.qa-selecting .agile-issue{
     margin-top:8px;
 }
 .qa-similar-actions .qa-btn{ flex:1; }
-.qa-similar-actions #qa-similar-more[hidden]{ display:none; }
+.qa-similar-actions #qa-similar-more[hidden],
+.qa-similar-actions #qa-similar-show-all[hidden]{ display:none; }
+/* Below-threshold candidates revealed via "Show all" — visually de-emphasised. */
+.qa-similar-item-low a{ opacity:0.62; }
+.qa-similar-item-low a:hover{ opacity:1; }
 
 /* Copy button injected beside the Redmine issue header <h2>Bug #NNNN</h2>. */
 /* Lives outside #qa-panel scope — pure static styling, no CSS variables. */

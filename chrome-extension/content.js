@@ -1808,8 +1808,9 @@ As a <role>, I want <goal> so that <benefit>.
             const descJacc = similarJaccard(descTokens, candDescTokens);
             const trackerBoost = (currentTracker && tracker.toLowerCase() === currentTracker) ? 0.3 : 0;
             const score = jacc * 0.55 + descJacc * 0.15 + trackerBoost;
-            if (score < SIMILAR_MIN_SCORE) return;
-            candidates.push({ id, subject, tracker, status, closedVersion, score });
+            // Kept even below threshold — the panel offers a "show all"
+            // control so users can still see every fetched candidate.
+            candidates.push({ id, subject, tracker, status, closedVersion, score, lowMatch: score < SIMILAR_MIN_SCORE });
         });
         candidates.sort((a, b) => b.score - a.score);
         return { results: candidates.slice(0, SIMILAR_RESULT_LIMIT), keywords: keywords };
@@ -2708,6 +2709,7 @@ As a <role>, I want <goal> so that <benefit>.
                     <div class="qa-similar-empty" id="qa-similar-empty" hidden>No similar closed tickets found in this project.</div>
                     <div class="qa-similar-actions">
                         <button class="qa-btn qa-tmpl-btn" data-action="similar-more" id="qa-similar-more" type="button" hidden><span class="qa-btn-icon">${svgIcon("chevron-right")}</span><span class="qa-btn-label" id="qa-similar-more-label">See more</span></button>
+                        <button class="qa-btn qa-tmpl-btn" data-action="similar-show-all" id="qa-similar-show-all" type="button" hidden title="Show every fetched candidate, including low-relevance matches"><span class="qa-btn-icon">${svgIcon("chevron-right")}</span><span class="qa-btn-label" id="qa-similar-show-all-label">Show all</span></button>
                         <button class="qa-btn qa-tmpl-btn" data-action="similar-refresh" id="qa-similar-refresh" type="button" title="Search again (bypass cache)"><span class="qa-btn-icon">${svgIcon("rotate-ccw")}</span><span class="qa-btn-label">Refresh</span></button>
                     </div>
                 </div>` : "";
@@ -3390,19 +3392,24 @@ As a <role>, I want <goal> so that <benefit>.
             // ---- Similar closed tickets (issue detail pages) ----
             // Auto-runs once per ticket view. Results cached in localStorage
             // and invalidated by the ticket's subject+tracker signature.
-            const similarWrap      = panel.querySelector("#qa-similar-wrap");
-            const similarStatus    = panel.querySelector("#qa-similar-status");
-            const similarStatusTxt = similarStatus && similarStatus.querySelector(".qa-similar-status-text");
-            const similarList      = panel.querySelector("#qa-similar-list");
-            const similarEmpty     = panel.querySelector("#qa-similar-empty");
-            const similarRefresh   = panel.querySelector("#qa-similar-refresh");
-            const similarMore      = panel.querySelector("#qa-similar-more");
-            const similarMoreLbl   = panel.querySelector("#qa-similar-more-label");
+            const similarWrap       = panel.querySelector("#qa-similar-wrap");
+            const similarStatus     = panel.querySelector("#qa-similar-status");
+            const similarStatusTxt  = similarStatus && similarStatus.querySelector(".qa-similar-status-text");
+            const similarList       = panel.querySelector("#qa-similar-list");
+            const similarEmpty      = panel.querySelector("#qa-similar-empty");
+            const similarRefresh    = panel.querySelector("#qa-similar-refresh");
+            const similarMore       = panel.querySelector("#qa-similar-more");
+            const similarMoreLbl    = panel.querySelector("#qa-similar-more-label");
+            const similarShowAll    = panel.querySelector("#qa-similar-show-all");
+            const similarShowAllLbl = panel.querySelector("#qa-similar-show-all-label");
 
-            // Full ranked result set + how many rows are currently rendered —
-            // drives the "See more" click and the scroll-triggered loads below.
-            let similarAllResults   = [];
-            let similarVisibleCount = 0;
+            // Full ranked result set (relevant matches first, then below-
+            // threshold ones) + how many rows are currently rendered — drives
+            // the "See more" click and the scroll-triggered loads below.
+            let similarAllResults      = [];
+            let similarVisibleCount    = 0;
+            let similarRelevantCount   = 0;
+            let similarShowAllUnlocked = false;
 
             function similarShowStatus(text, spinner) {
                 if (!similarStatus) return;
@@ -3412,19 +3419,25 @@ As a <role>, I want <goal> so that <benefit>.
                 if (s) s.style.display = spinner ? "" : "none";
                 if (similarList)  { similarList.hidden  = true; similarList.innerHTML = ""; }
                 if (similarEmpty) similarEmpty.hidden = true;
+                if (similarShowAll) similarShowAll.hidden = true;
             }
             function similarShowEmpty() {
                 if (similarStatus) similarStatus.hidden = true;
                 if (similarList)   { similarList.hidden = true; similarList.innerHTML = ""; }
-                if (similarEmpty)  similarEmpty.hidden = false;
+                if (similarEmpty)  {
+                    similarEmpty.hidden = false;
+                    similarEmpty.textContent = "No similar closed tickets found in this project.";
+                }
+                if (similarShowAll) similarShowAll.hidden = true;
             }
             function similarItemHtml(r) {
                 const pct = Math.round(r.score * 100);
                 const trackerCls = "qa-similar-badge qa-similar-tracker-" + String(r.tracker || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
                 const href = REDMINE + "/issues/" + r.id;
                 const meta = r.closedVersion ? ("Closed in " + escapeText(r.closedVersion)) : "Closed";
+                const lowCls = r.lowMatch ? " qa-similar-item-low" : "";
                 return `
-                        <li class="qa-similar-item">
+                        <li class="qa-similar-item${lowCls}">
                             <a href="${href}" target="_blank" rel="noopener" title="${escapeText(r.subject)}">
                                 <span class="qa-similar-row-top">
                                     <span class="qa-similar-id">#${escapeText(r.id)}</span>
@@ -3436,32 +3449,62 @@ As a <role>, I want <goal> so that <benefit>.
                             </a>
                         </li>`;
             }
+            // Reveal is capped at the relevant matches until "Show all" unlocks the rest.
+            function similarEffectiveCap() {
+                return similarShowAllUnlocked ? similarAllResults.length : similarRelevantCount;
+            }
             // Appends the next `amount` not-yet-rendered results to the list.
             function similarRevealMore(amount) {
+                const cap = similarEffectiveCap();
                 const start = similarVisibleCount;
-                const end = Math.min(start + amount, similarAllResults.length);
+                const end = Math.min(start + amount, cap);
                 if (end <= start) return;
                 similarList.insertAdjacentHTML("beforeend", similarAllResults.slice(start, end).map(similarItemHtml).join(""));
                 similarVisibleCount = end;
             }
+            // Shows/hides the "Show N more (low relevance)" control once every
+            // relevant match has been revealed and lower-scored extras exist.
+            function similarUpdateShowAllControl() {
+                if (!similarShowAll) return;
+                const extra = similarAllResults.length - similarRelevantCount;
+                const relevantFullyShown = similarVisibleCount >= similarRelevantCount;
+                const show = extra > 0 && !similarShowAllUnlocked && relevantFullyShown;
+                similarShowAll.hidden = !show;
+                if (show && similarShowAllLbl) similarShowAllLbl.textContent = "Show " + extra + " more (low relevance)";
+            }
             function similarRenderResults(results) {
                 if (!similarList) return;
-                similarAllResults   = results || [];
-                similarVisibleCount = 0;
+                similarAllResults      = results || [];
+                similarVisibleCount    = 0;
+                similarShowAllUnlocked = false;
+                similarRelevantCount   = similarAllResults.reduce((n, r) => n + (r.lowMatch ? 0 : 1), 0);
                 if (!similarAllResults.length) { similarShowEmpty(); return; }
                 if (similarStatus) similarStatus.hidden = true;
-                if (similarEmpty)  similarEmpty.hidden  = true;
                 similarList.innerHTML = "";
                 similarList.scrollTop = 0;
-                similarList.hidden = false;
-                similarRevealMore(SIMILAR_INITIAL_VISIBLE);
-                // The button only ever offers the first expansion (5 → 10);
-                // everything past that loads by scrolling the list itself.
-                const firstBatchRemaining = Math.min(SIMILAR_PAGE_SIZE, similarAllResults.length) - similarVisibleCount;
-                if (similarMore) {
-                    similarMore.hidden = firstBatchRemaining <= 0;
-                    if (similarMoreLbl) similarMoreLbl.textContent = "See more (" + firstBatchRemaining + ")";
+
+                if (similarRelevantCount === 0) {
+                    similarList.hidden = true;
+                    if (similarEmpty) {
+                        similarEmpty.hidden = false;
+                        similarEmpty.textContent = "No close matches — " + similarAllResults.length
+                            + " loosely related ticket" + (similarAllResults.length === 1 ? "" : "s") + " available below.";
+                    }
+                } else {
+                    if (similarEmpty) similarEmpty.hidden = true;
+                    similarList.hidden = false;
+                    similarRevealMore(SIMILAR_INITIAL_VISIBLE);
+                    // The button only ever offers the first expansion (5 → 10)
+                    // within the relevant matches; everything past that loads
+                    // by scrolling the list itself.
+                    const firstBatchTarget = Math.min(SIMILAR_PAGE_SIZE, similarRelevantCount);
+                    const firstBatchRemaining = firstBatchTarget - similarVisibleCount;
+                    if (similarMore) {
+                        similarMore.hidden = firstBatchRemaining <= 0;
+                        if (similarMoreLbl) similarMoreLbl.textContent = "See more (" + firstBatchRemaining + ")";
+                    }
                 }
+                similarUpdateShowAllControl();
             }
 
             // Small local HTML-escaper — model output goes into innerHTML.
@@ -3509,14 +3552,20 @@ As a <role>, I want <goal> so that <benefit>.
             if (similarMore) similarMore.addEventListener("click", () => {
                 similarRevealMore(SIMILAR_PAGE_SIZE - SIMILAR_INITIAL_VISIBLE);
                 similarMore.hidden = true;
+                similarUpdateShowAllControl();
             });
-            // Infinite-scroll: once the button's first batch is exhausted,
-            // reaching the bottom of the (now internally-scrolling) list loads
-            // the next page of already-fetched, already-ranked results.
+            if (similarShowAll) similarShowAll.addEventListener("click", () => {
+                similarShowAllUnlocked = true;
+                similarShowAll.hidden = true;
+                similarRevealMore(SIMILAR_PAGE_SIZE);
+            });
+            // Infinite-scroll: once the current batch (relevant matches, or the
+            // unlocked full set) is exhausted, reaching the bottom of the list
+            // loads the next page of already-fetched, already-ranked results.
             if (similarList) similarList.addEventListener("scroll", () => {
-                if (similarVisibleCount >= similarAllResults.length) return;
+                if (similarVisibleCount >= similarEffectiveCap()) return;
                 const nearBottom = similarList.scrollTop + similarList.clientHeight >= similarList.scrollHeight - 24;
-                if (nearBottom) similarRevealMore(SIMILAR_PAGE_SIZE);
+                if (nearBottom) { similarRevealMore(SIMILAR_PAGE_SIZE); similarUpdateShowAllControl(); }
             });
             if (similarWrap && isIssueDetailPage()) {
                 similarWrap.hidden = false;

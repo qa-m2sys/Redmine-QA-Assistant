@@ -77,7 +77,8 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
 ### 🔎 Similar closed tickets
 - On any issue detail page (`/issues/<n>`), the panel gains a **"Similar closed tickets"** section that auto-populates on load.
 - Scans up to **100** of the project's already-closed tickets whose subject overlaps the current one — the local ranker scores on **subject overlap (primary) + description overlap (secondary) + a same-tracker bonus**.
-- The panel shows **5** by default; a **See more** button reveals the next batch (up to 10 total), then scrolling to the bottom of the list loads **10 more at a time** until every ranked match has been shown.
+- The panel shows **5** by default; a **See more** button reveals the next batch (up to 10 total), then scrolling to the bottom of the list loads **10 more at a time** until every relevant match has been shown.
+- Candidates below the relevance bar aren't discarded — once every relevant match has been paged through, a **Show N more (low relevance)** button reveals them too (dimmed, so they read as secondary), then scrolling continues through them the same way.
 - Each row shows `#id · Tracker · match%`, a 2-line subject, and the closed version (e.g. *Closed in v9.4.0*), opening in a new tab so your current ticket stays put.
 - Results are cached per issue in `localStorage` and signed by `subject|tracker`, so a rename auto-invalidates the cache. **Refresh** re-runs the search bypassing the cache.
 - Test Case tickets are excluded from the results.
@@ -206,12 +207,15 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a full history of what changed in e
   on **subject overlap + description overlap + a same-tracker bonus**, it
   scans up to **100** closed tickets and shows the top **5** by default;
   a **See more** button reveals the next batch, then scrolling to the
-  bottom of the list loads 10 more at a time until everything ranked is
-  shown. Each row shows `#id · Tracker · match%` + a 2-line subject +
-  the closed version, and results open in a new tab so your current
-  ticket stays put. Cached per issue and signed by `subject|tracker` so
-  a rename auto-invalidates it; a **Refresh** button re-runs the search
-  bypassing the cache. Test Case tickets are excluded.
+  bottom of the list loads 10 more at a time until every relevant match
+  is shown. Candidates below the relevance bar aren't discarded — a
+  **Show N more (low relevance)** button reveals them too (dimmed) once
+  the relevant matches are exhausted, then scrolling pages through them
+  the same way. Each row shows `#id · Tracker · match%` + a 2-line
+  subject + the closed version, and results open in a new tab so your
+  current ticket stays put. Cached per issue and signed by
+  `subject|tracker` so a rename auto-invalidates it; a **Refresh** button
+  re-runs the search bypassing the cache. Test Case tickets are excluded.
 - **QA Daily Report (agile board)** — A chip strip injected under the
   board header on `/projects/*/agile/board*` pages showing tickets
   filed by each QA teammate since 10:00 AM local time. Each count is a
