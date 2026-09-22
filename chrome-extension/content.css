@@ -2884,10 +2884,12 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
     position:absolute;
     top:50%;
     left:0;
-    width:48px;
+    width:46px;
     height:36px;
     margin-top:-18px;
     will-change:transform;
+    pointer-events:auto;
+    cursor:pointer;
 }
 .qa-cat-sprite{
     position:relative;
@@ -2895,57 +2897,32 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
     height:100%;
     will-change:transform;
 }
-.qa-cat-svg{
+/* Pixel-art cat (box-shadow technique): .qa-cat-pixel is a 1x1 box whose
+   ::after paints every non-transparent grid cell as its own shadow "pixel" —
+   the shadow list is generated in JS (qaCatPixelBoxShadow()) and applied via
+   the --qa-cat-shadow custom property. */
+.qa-cat-pixel{
+    position:relative;
     display:block;
-    width:48px;
+    width:46px;
     height:36px;
-    image-rendering:pixelated;
-    shape-rendering:crispEdges;
 }
-/* Sprite parts: hide sitting pose by default; sit-state class swaps them in. */
-.qa-cat-tail-sit,
-.qa-cat-paws-sit,
-.qa-cat-front{ display:none; }
-.qa-cat-sprite.qa-cat-sit .qa-cat-side,
-.qa-cat-sprite.qa-cat-sit .qa-cat-tail-walk,
-.qa-cat-sprite.qa-cat-sit .qa-cat-legs-walk{ display:none; }
-.qa-cat-sprite.qa-cat-sit .qa-cat-front,
-.qa-cat-sprite.qa-cat-sit .qa-cat-tail-sit,
-.qa-cat-sprite.qa-cat-sit .qa-cat-paws-sit{ display:block; }
-
-/* Walk: sprite bob, tail wag, alternating leg step. */
-.qa-cat-sprite.qa-cat-walk .qa-cat-svg{ animation:qa-cat-bob 0.5s ease-in-out infinite; }
-.qa-cat-sprite.qa-cat-walk .qa-cat-tail-walk{
-    transform-origin:5px 12px;
-    transform-box:fill-box;
-    animation:qa-cat-tail-wag 0.6s ease-in-out infinite;
-}
-.qa-cat-sprite.qa-cat-walk .qa-cat-leg-a{
-    transform-box:fill-box;
-    animation:qa-cat-leg-a 0.4s ease-in-out infinite;
-}
-.qa-cat-sprite.qa-cat-walk .qa-cat-leg-b{
-    transform-box:fill-box;
-    animation:qa-cat-leg-b 0.4s ease-in-out infinite;
+.qa-cat-pixel::after{
+    content:"";
+    position:absolute;
+    top:0;
+    left:0;
+    width:2px;
+    height:2px;
+    box-shadow:var(--qa-cat-shadow);
 }
 
-/* Idle: gentle breathing, slow tail sway, occasional blink. */
-.qa-cat-sprite.qa-cat-idle .qa-cat-svg{ animation:qa-cat-breathe 3.5s ease-in-out infinite; }
-.qa-cat-sprite.qa-cat-idle .qa-cat-tail-walk{
-    transform-origin:5px 12px;
-    transform-box:fill-box;
-    animation:qa-cat-tail-sway 2.2s ease-in-out infinite;
-}
-.qa-cat-sprite.qa-cat-idle .qa-cat-eyes{ animation:qa-cat-blink 4.5s steps(1,end) infinite; }
+/* Walk: whole sprite bobs while .qa-cat-walker's translateX moves it along the lane. */
+.qa-cat-sprite.qa-cat-walk .qa-cat-pixel{ animation:qa-cat-bob 0.5s ease-in-out infinite; }
 
-/* Sit: breathing + rare blink + occasional tail flick. */
-.qa-cat-sprite.qa-cat-sit .qa-cat-svg{ animation:qa-cat-breathe 3.5s ease-in-out infinite; }
-.qa-cat-sprite.qa-cat-sit .qa-cat-tail-sit{
-    transform-origin:6px 18px;
-    transform-box:fill-box;
-    animation:qa-cat-tail-flick 2s ease-in-out infinite;
-}
-.qa-cat-sprite.qa-cat-sit .qa-cat-eyes{ animation:qa-cat-blink 5.5s steps(1,end) infinite; }
+/* Idle / Sit: gentle breathing — the same pixel art serves every pose. */
+.qa-cat-sprite.qa-cat-idle .qa-cat-pixel,
+.qa-cat-sprite.qa-cat-sit .qa-cat-pixel{ animation:qa-cat-breathe 3.5s ease-in-out infinite; }
 
 /* Jump: brief hop — runs once when the pose class is applied. */
 .qa-cat-sprite.qa-cat-jump{ animation:qa-cat-hop 0.9s cubic-bezier(0.3,0,0.5,1) both; }
@@ -2958,36 +2935,11 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
     0%,100%{ transform:scaleY(1); }
     50%    { transform:scaleY(0.97); }
 }
-@keyframes qa-cat-tail-wag{
-    0%,100%{ transform:rotate(-15deg); }
-    50%    { transform:rotate(20deg); }
-}
-@keyframes qa-cat-tail-sway{
-    0%,100%{ transform:rotate(-5deg); }
-    50%    { transform:rotate(8deg); }
-}
-@keyframes qa-cat-tail-flick{
-    0%,80%,100%{ transform:rotate(0deg); }
-    88%        { transform:rotate(-10deg); }
-    94%        { transform:rotate(6deg); }
-}
-@keyframes qa-cat-leg-a{
-    0%,100%{ transform:translateY(0); }
-    50%    { transform:translateY(-1px); }
-}
-@keyframes qa-cat-leg-b{
-    0%,100%{ transform:translateY(-1px); }
-    50%    { transform:translateY(0); }
-}
 @keyframes qa-cat-hop{
     0%   { transform:translateY(0); }
     35%  { transform:translateY(-14px); }
     55%  { transform:translateY(-14px); }
     100% { transform:translateY(0); }
-}
-@keyframes qa-cat-blink{
-    0%,92%,100%{ opacity:1; }
-    95%        { opacity:0.15; }
 }
 @media (prefers-reduced-motion: reduce){
     .qa-cat-sprite,

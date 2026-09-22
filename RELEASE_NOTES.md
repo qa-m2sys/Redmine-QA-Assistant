@@ -5,7 +5,64 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.16 — current
+## Version 7.2.21 — current
+
+### 🐾 Click the agile-board cat to make it jump
+The pixel cat now responds to clicks with a little hop, on top of its usual
+random walk / sit / jump / idle cycle. Respects `prefers-reduced-motion`
+(clicks are a no-op for those users, same as the automatic animations).
+
+---
+
+## Version 7.2.20
+
+### 🐾 Fixed: pixel cat was still facing the wrong way
+7.2.19's "lean instead of mirror" fix assumed the new pixel art was a
+symmetric front-facing cat, but it's actually asymmetric (default pose
+faces left) — so it needed a corrected mirror flip, not a lean. Walking
+right now flips the sprite to face right; walking left keeps its natural
+left-facing pose.
+
+---
+
+## Version 7.2.19
+
+### 🐾 Fixed: pixel cat didn't face the direction it walked
+The new pixel-art cat (7.2.18) faces the viewer head-on rather than in
+side profile, so mirroring it while walking — the trick the old SVG cat
+used — didn't visibly change anything. It now leans a few degrees toward
+the direction it's walking instead, which actually reads as movement for
+a front-facing sprite.
+
+---
+
+## Version 7.2.18
+
+### 🐱 Redesigned the agile-board pet cat
+ New pixel-art look for the little cat that walks the QA daily report widget,
+built with the classic box-shadow pixel-art technique (one shadow per pixel
+on a single 1x1 element) instead of hand-drawn SVG rects.
+
+- Kept the walk / sit / jump / idle behavior and the jump (hop) + sit
+  (breathing) animations.
+- The new art is a single pose, so the old separate tail-wag / leg-step /
+  blink sub-animations (which needed distinct walking vs. sitting artwork)
+  were dropped along with the artwork they animated.
+
+---
+
+## Version 7.2.17
+
+### 🔎 Fixed: zoomed lightbox images looked blurry
+Zooming in used to stretch the image with a CSS `transform: scale()` —
+cheap, but it just enlarges an already-downsized bitmap, so anything past
+the box's default growth range looked soft compared to the original file.
+Zoom now resizes the image's actual pixel dimensions instead, so the
+browser renders it at its real target resolution and detail stays sharp.
+
+---
+
+## Version 7.2.16
 
 ### 📌 Attachment lightbox — caption bar anchored to the bottom
 The name / zoom controls / "Open original" row used to sit directly under

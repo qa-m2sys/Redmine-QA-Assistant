@@ -5676,20 +5676,23 @@ As a <role>, I want <goal> so that <benefit>.
 
     // Figures out how much the viewer box itself can grow for the current
     // zoom level before it's maxed out at the available viewport space —
-    // past that point the box stays maxed and the image scales+pans inside it.
+    // past that point the box stays maxed and the image pans within it.
     function qaLightboxGeometry() {
         const lim = qaLightboxLimits();
         if (!qaLightboxBaseW || !qaLightboxBaseH) {
-            return { boxW: lim.comfortW, boxH: lim.comfortH, overflowFactor: 1, known: false };
+            return { boxW: lim.comfortW, boxH: lim.comfortH, contentW: lim.comfortW, contentH: lim.comfortH, overflowing: false, known: false };
         }
         const zoomAtMax = Math.max(LIGHTBOX_ZOOM_MIN, Math.min(lim.hardW / qaLightboxBaseW, lim.hardH / qaLightboxBaseH));
-        if (qaLightboxZoom <= zoomAtMax) {
-            return { boxW: qaLightboxBaseW * qaLightboxZoom, boxH: qaLightboxBaseH * qaLightboxZoom, overflowFactor: 1, known: true };
-        }
+        const boxZoom = Math.min(qaLightboxZoom, zoomAtMax);
+        // contentW/H is the image's real target size at the full zoom level —
+        // laid out at that exact resolution (never a CSS-scaled copy of a
+        // smaller raster) so zoomed-in detail stays sharp instead of blurring.
         return {
-            boxW: Math.min(qaLightboxBaseW * zoomAtMax, lim.hardW),
-            boxH: Math.min(qaLightboxBaseH * zoomAtMax, lim.hardH),
-            overflowFactor: qaLightboxZoom / zoomAtMax,
+            boxW: qaLightboxBaseW * boxZoom,
+            boxH: qaLightboxBaseH * boxZoom,
+            contentW: qaLightboxBaseW * qaLightboxZoom,
+            contentH: qaLightboxBaseH * qaLightboxZoom,
+            overflowing: qaLightboxZoom > zoomAtMax,
             known: true
         };
     }
@@ -5708,9 +5711,10 @@ As a <role>, I want <goal> so that <benefit>.
         qaLightboxApplyTransform();
     }
 
-    // Reflects zoom/pan state onto the box size, transformed layer, and
-    // button/label states. The box (.qa-lightbox-media) grows with zoom up
-    // to the available viewport, then further zoom scales+pans the content.
+    // Reflects zoom/pan state onto the box size, the content layer's real
+    // pixel size, and button/label states. The box (.qa-lightbox-media) grows
+    // with zoom up to the available viewport, then further zoom keeps the
+    // content laid out at full resolution and pans it within the maxed box.
     function qaLightboxApplyTransform() {
         if (!qaLightboxEl) return;
         const media = qaLightboxEl.querySelector(".qa-lightbox-media");
@@ -5721,9 +5725,13 @@ As a <role>, I want <goal> so that <benefit>.
             // safety net) never clamps growth past the old "comfort" size.
             media.style.width  = Math.round(geo.boxW) + "px";
             media.style.height = Math.round(geo.boxH) + "px";
-            media.classList.toggle("qa-lightbox-zoomed", geo.known && geo.overflowFactor > 1);
+            media.classList.toggle("qa-lightbox-zoomed", geo.overflowing);
         }
-        if (layer) layer.style.transform = "translate(" + qaLightboxPanX + "px, " + qaLightboxPanY + "px) scale(" + geo.overflowFactor + ")";
+        if (layer) {
+            layer.style.width  = Math.round(geo.contentW) + "px";
+            layer.style.height = Math.round(geo.contentH) + "px";
+            layer.style.transform = "translate(" + qaLightboxPanX + "px, " + qaLightboxPanY + "px)";
+        }
         const label = qaLightboxEl.querySelector(".qa-lightbox-zoom-level");
         if (label) label.textContent = Math.round(qaLightboxZoom * 100) + "%";
         const zoomOutBtn = qaLightboxEl.querySelector(".qa-lightbox-zoom-out");
@@ -5736,9 +5744,9 @@ As a <role>, I want <goal> so that <benefit>.
     // box itself is still growing (nothing overflows it yet).
     function qaLightboxClampPan() {
         const geo = qaLightboxGeometry();
-        if (!geo.known || geo.overflowFactor <= 1) { qaLightboxPanX = 0; qaLightboxPanY = 0; return; }
-        const maxX = Math.max(0, (geo.boxW * geo.overflowFactor - geo.boxW) / 2);
-        const maxY = Math.max(0, (geo.boxH * geo.overflowFactor - geo.boxH) / 2);
+        if (!geo.known || !geo.overflowing) { qaLightboxPanX = 0; qaLightboxPanY = 0; return; }
+        const maxX = Math.max(0, (geo.contentW - geo.boxW) / 2);
+        const maxY = Math.max(0, (geo.contentH - geo.boxH) / 2);
         qaLightboxPanX = Math.min(maxX, Math.max(-maxX, qaLightboxPanX));
         qaLightboxPanY = Math.min(maxY, Math.max(-maxY, qaLightboxPanY));
     }
@@ -5882,7 +5890,7 @@ As a <role>, I want <goal> so that <benefit>.
         media.addEventListener("mousedown", (e) => {
             const current = qaLightboxItems[qaLightboxIndex];
             if (!current || current.type === "video") return;
-            if (qaLightboxGeometry().overflowFactor <= 1) return;
+            if (!qaLightboxGeometry().overflowing) return;
             qaLightboxDragging = true;
             qaLightboxDragStartX = e.clientX;
             qaLightboxDragStartY = e.clientY;
@@ -6167,6 +6175,44 @@ As a <role>, I want <goal> so that <benefit>.
     // Cat state machine: cycles between walk / sit / jump / idle inside the
     // cat lane. Position + facing live on .qa-cat-walker (translateX + scaleX)
     // so CSS pose animations on the inner .qa-cat-sprite compose cleanly.
+    // Sitting-cat pixel art (box-shadow technique, ported from a found SCSS
+    // snippet) — each non-transparent cell becomes one shadow "pixel" on a
+    // shared 1x1 ::after. 0 = transparent (skipped — invisible anyway).
+    const QA_CAT_PIXEL_SIZE = 2; // px per pixel — grid is 23 cols x 18 rows -> 46x36
+    const QA_CAT_PIXEL_COLORS = { k: "#000", g: "#cdc9cf", d: "#a09da1", p: "#ffa6ed" };
+    const QA_CAT_PIXEL_GRID = [
+        [0,0,0,'k',0,0,0,0,0,0,'k'],
+        [0,0,'k','g','k',0,0,0,0,'k','g','k'],
+        [0,0,'k','g','d','k','k','k','k','d','g','k',0,0,0,0,0,0,0,0,'k','k'],
+        [0,'k','d','g','g','d','d','g','d','g','g','d','k',0,0,0,0,0,0,'k','g','g','k'],
+        [0,'k','g','g','g','g','g','g','g','g','g','g','k',0,0,0,0,0,0,'k','g','g','k'],
+        ['k','d','g','g','g','g','g','g','g','g','g','g','d','k','k','k','k',0,0,0,'k','d','k'],
+        ['k','g','g','k','g','g','k','g','g','k','g','g','g','d','g','d','g','k',0,0,'k','g','k'],
+        ['k','g','p','g','g','k','g','k','g','g','p','g','g','d','g','d','g','g','k','k','k','d','k'],
+        ['k','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','k','g','k'],
+        ['k','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','k','g','k'],
+        ['k','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','k'],
+        ['k','d','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','k'],
+        ['k','d','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','k'],
+        ['k','d','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','d','k'],
+        [0,'k','d','g','g','g','g','g','g','g','g','g','g','g','g','g','g','g','d','k'],
+        [0,0,'k','d','g','d','d','g','d','g','g','g','d','g','d','d','g','d','k'],
+        [0,0,0,'k','g','k','k','g','k','k','k','k','k','g','k','k','g','k'],
+        [0,0,0,'k','k',0,0,'k','k',0,0,0,'k','k',0,0,'k','k']
+    ];
+    // Precomputed once — the grid is static, so this never needs recomputing per instance.
+    function qaCatPixelBoxShadow() {
+        const parts = [];
+        QA_CAT_PIXEL_GRID.forEach((row, y) => {
+            row.forEach((cell, x) => {
+                if (!cell) return;
+                parts.push((x * QA_CAT_PIXEL_SIZE) + "px " + (y * QA_CAT_PIXEL_SIZE) + "px " + QA_CAT_PIXEL_COLORS[cell]);
+            });
+        });
+        return parts.join(", ");
+    }
+    const QA_CAT_PIXEL_SHADOW = qaCatPixelBoxShadow();
+
     function qaCatStop(root) {
         const cat = root.querySelector(".qa-board-daily-cat");
         if (!cat) return;
@@ -6179,6 +6225,23 @@ As a <role>, I want <goal> so that <benefit>.
             walker.style.transform = "translateX(0px) scaleX(1)";
         }
         if (sprite) sprite.className = "qa-cat-sprite qa-cat-sit";
+    }
+
+    // Click-to-bounce easter egg — plays the hop animation on demand and
+    // restores whatever pose the state machine was already in once it ends.
+    function qaCatBounce(root) {
+        if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        const cat = root.querySelector(".qa-board-daily-cat");
+        const sprite = cat && cat.querySelector(".qa-cat-sprite");
+        if (!sprite) return;
+        if (!sprite.classList.contains("qa-cat-jump")) sprite.dataset.qaPrevClass = sprite.className;
+        sprite.className = "qa-cat-sprite";
+        void sprite.offsetWidth; // restart the hop animation even on rapid re-clicks
+        sprite.className = "qa-cat-sprite qa-cat-jump";
+        clearTimeout(sprite._qaBounceTimer);
+        sprite._qaBounceTimer = setTimeout(() => {
+            sprite.className = sprite.dataset.qaPrevClass || "qa-cat-sprite qa-cat-sit";
+        }, 900);
     }
 
     function qaCatStart(root) {
@@ -6208,9 +6271,11 @@ As a <role>, I want <goal> so that <benefit>.
         const laneWidth = () => Math.max(0, (cat.clientWidth || 0) - 48);
 
         const setPose = (pose) => { sprite.className = "qa-cat-sprite qa-cat-" + pose; };
+        // The art's default (unflipped) pose faces left, so facing=1 (moving
+        // right) needs the mirror flip — i.e. scaleX(-facing), not scaleX(facing).
         const setTransform = (transition) => {
             walker.style.transition = transition || "none";
-            walker.style.transform = "translateX(" + x + "px) scaleX(" + facing + ")";
+            walker.style.transform = "translateX(" + x + "px) scaleX(" + (-facing) + ")";
         };
 
         const decide = () => {
@@ -6288,128 +6353,18 @@ As a <role>, I want <goal> so that <benefit>.
             +   '</div>'
             +   '<div class="qa-board-daily-chips" id="qa-board-daily-chips"></div>'
             + '</div>'
-            + '<div class="qa-board-daily-cat" aria-hidden="true" title="just here for vibes"><div class="qa-cat-walker"><div class="qa-cat-sprite qa-cat-walk">'
-            +   '<svg class="qa-cat-svg" viewBox="0 0 32 24" fill="#f4a261" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">'
-            +     '<g class="qa-cat-side">'
-            +       '<g class="qa-cat-tail-walk">'
-            +         '<rect x="1" y="10" width="2" height="2"/>'
-            +         '<rect x="0" y="8" width="2" height="2"/>'
-            +         '<rect x="0" y="6" width="2" height="2"/>'
-            +         '<rect x="1" y="4" width="2" height="2"/>'
-            +         '<rect x="1" y="7" width="1" height="1" fill="#d67a3e"/>'
-            +         '<rect x="1" y="4" width="1" height="1" fill="#ffd6a5"/>'
-            +       '</g>'
-            +       '<rect x="18" y="3" width="2" height="3"/>'
-            +       '<rect x="19" y="2" width="1" height="1"/>'
-            +       '<rect x="27" y="3" width="2" height="3"/>'
-            +       '<rect x="27" y="2" width="1" height="1"/>'
-            +       '<rect x="18" y="4" width="1" height="2" fill="#ffb391"/>'
-            +       '<rect x="28" y="4" width="1" height="2" fill="#ffb391"/>'
-            +       '<rect x="17" y="5" width="13" height="9"/>'
-            +       '<rect x="16" y="10" width="1" height="3"/>'
-            +       '<rect x="30" y="10" width="1" height="3"/>'
-            +       '<rect x="20" y="5" width="1" height="2" fill="#d67a3e"/>'
-            +       '<rect x="23" y="5" width="1" height="2" fill="#d67a3e"/>'
-            +       '<rect x="25" y="5" width="1" height="2" fill="#d67a3e"/>'
-            +       '<rect x="27" y="5" width="1" height="2" fill="#d67a3e"/>'
-            +       '<rect x="21" y="7" width="1" height="1" fill="#d67a3e"/>'
-            +       '<rect x="26" y="7" width="1" height="1" fill="#d67a3e"/>'
-            +       '<g class="qa-cat-eyes">'
-            +         '<rect x="19" y="8" width="3" height="3" fill="#ffffff"/>'
-            +         '<rect x="24" y="8" width="3" height="3" fill="#ffffff"/>'
-            +         '<rect x="20" y="9" width="1" height="1" fill="#1a1a1a"/>'
-            +         '<rect x="25" y="9" width="1" height="1" fill="#1a1a1a"/>'
-            +       '</g>'
-            +       '<rect x="23" y="11" width="2" height="1" fill="#e6879a"/>'
-            +       '<rect x="23" y="12" width="1" height="1" fill="#e6879a"/>'
-            +       '<rect x="22" y="13" width="1" height="1" fill="#1a1a1a"/>'
-            +       '<rect x="24" y="13" width="1" height="1" fill="#1a1a1a"/>'
-            +       '<rect x="13" y="11" width="3" height="1" fill="#4a4a4a" opacity="0.55"/>'
-            +       '<rect x="13" y="12" width="3" height="1" fill="#4a4a4a" opacity="0.45"/>'
-            +       '<rect x="30" y="11" width="2" height="1" fill="#4a4a4a" opacity="0.55"/>'
-            +       '<rect x="30" y="12" width="2" height="1" fill="#4a4a4a" opacity="0.45"/>'
-            +       '<rect x="3" y="13" width="17" height="8"/>'
-            +       '<rect x="5" y="13" width="1" height="3" fill="#d67a3e"/>'
-            +       '<rect x="8" y="13" width="1" height="3" fill="#d67a3e"/>'
-            +       '<rect x="11" y="13" width="1" height="3" fill="#d67a3e"/>'
-            +       '<rect x="14" y="13" width="1" height="3" fill="#d67a3e"/>'
-            +       '<rect x="17" y="13" width="1" height="3" fill="#d67a3e"/>'
-            +       '<rect x="4" y="16" width="16" height="5" fill="#ffd6a5"/>'
-            +       '<g class="qa-cat-legs-walk">'
-            +         '<rect class="qa-cat-leg qa-cat-leg-a" x="4" y="20" width="2" height="3"/>'
-            +         '<rect class="qa-cat-leg qa-cat-leg-b" x="8" y="20" width="2" height="3"/>'
-            +         '<rect class="qa-cat-leg qa-cat-leg-b" x="14" y="20" width="2" height="3"/>'
-            +         '<rect class="qa-cat-leg qa-cat-leg-a" x="18" y="20" width="2" height="3"/>'
-            +         '<rect x="4" y="22" width="2" height="1" fill="#1a1a1a"/>'
-            +         '<rect x="8" y="22" width="2" height="1" fill="#1a1a1a"/>'
-            +         '<rect x="14" y="22" width="2" height="1" fill="#1a1a1a"/>'
-            +         '<rect x="18" y="22" width="2" height="1" fill="#1a1a1a"/>'
-            +       '</g>'
-            +     '</g>'
-            +     '<g class="qa-cat-front">'
-            +       '<rect x="9" y="4" width="3" height="3"/>'
-            +       '<rect x="10" y="3" width="2" height="1"/>'
-            +       '<rect x="20" y="4" width="3" height="3"/>'
-            +       '<rect x="20" y="3" width="2" height="1"/>'
-            +       '<rect x="10" y="5" width="1" height="2" fill="#ffb391"/>'
-            +       '<rect x="21" y="5" width="1" height="2" fill="#ffb391"/>'
-            +       '<rect x="9" y="4" width="1" height="1" fill="#d67a3e"/>'
-            +       '<rect x="22" y="4" width="1" height="1" fill="#d67a3e"/>'
-            +       '<rect x="9" y="7" width="14" height="7"/>'
-            +       '<rect x="8" y="10" width="1" height="3"/>'
-            +       '<rect x="23" y="10" width="1" height="3"/>'
-            +       '<rect x="7" y="11" width="1" height="1"/>'
-            +       '<rect x="24" y="11" width="1" height="1"/>'
-            +       '<rect x="11" y="7" width="1" height="2" fill="#d67a3e"/>'
-            +       '<rect x="14" y="7" width="1" height="2" fill="#d67a3e"/>'
-            +       '<rect x="17" y="7" width="1" height="2" fill="#d67a3e"/>'
-            +       '<rect x="20" y="7" width="1" height="2" fill="#d67a3e"/>'
-            +       '<g class="qa-cat-eyes">'
-            +         '<rect x="11" y="9" width="3" height="3" fill="#ffffff"/>'
-            +         '<rect x="18" y="9" width="3" height="3" fill="#ffffff"/>'
-            +         '<rect x="12" y="10" width="1" height="2" fill="#1a1a1a"/>'
-            +         '<rect x="19" y="10" width="1" height="2" fill="#1a1a1a"/>'
-            +         '<rect x="13" y="10" width="1" height="1" fill="#ffd6a5" opacity="0.7"/>'
-            +         '<rect x="20" y="10" width="1" height="1" fill="#ffd6a5" opacity="0.7"/>'
-            +       '</g>'
-            +       '<rect x="15" y="11" width="2" height="1" fill="#e6879a"/>'
-            +       '<rect x="15" y="12" width="2" height="1" fill="#e6879a"/>'
-            +       '<rect x="15" y="13" width="1" height="1" fill="#1a1a1a"/>'
-            +       '<rect x="16" y="13" width="1" height="1" fill="#1a1a1a"/>'
-            +       '<rect x="5" y="11" width="3" height="1" fill="#4a4a4a" opacity="0.55"/>'
-            +       '<rect x="5" y="12" width="3" height="1" fill="#4a4a4a" opacity="0.45"/>'
-            +       '<rect x="24" y="11" width="3" height="1" fill="#4a4a4a" opacity="0.55"/>'
-            +       '<rect x="24" y="12" width="3" height="1" fill="#4a4a4a" opacity="0.45"/>'
-            +       '<rect x="7" y="14" width="18" height="7"/>'
-            +       '<rect x="8" y="14" width="1" height="3" fill="#d67a3e"/>'
-            +       '<rect x="24" y="14" width="1" height="3" fill="#d67a3e"/>'
-            +       '<rect x="9" y="15" width="14" height="6" fill="#ffd6a5"/>'
-            +       '<rect x="15" y="14" width="2" height="1" fill="#ffd6a5"/>'
-            +       '<g class="qa-cat-tail-sit">'
-            +         '<rect x="24" y="15" width="2" height="2"/>'
-            +         '<rect x="25" y="17" width="2" height="2"/>'
-            +         '<rect x="24" y="19" width="2" height="2"/>'
-            +         '<rect x="22" y="20" width="2" height="1"/>'
-            +         '<rect x="25" y="18" width="1" height="1" fill="#d67a3e"/>'
-            +         '<rect x="22" y="20" width="1" height="1" fill="#ffd6a5"/>'
-            +       '</g>'
-            +       '<g class="qa-cat-paws-sit">'
-            +         '<rect x="10" y="19" width="4" height="3"/>'
-            +         '<rect x="18" y="19" width="4" height="3"/>'
-            +         '<rect x="11" y="20" width="1" height="2" fill="#d67a3e"/>'
-            +         '<rect x="20" y="20" width="1" height="2" fill="#d67a3e"/>'
-            +         '<rect x="10" y="22" width="4" height="1" fill="#1a1a1a"/>'
-            +         '<rect x="18" y="22" width="4" height="1" fill="#1a1a1a"/>'
-            +       '</g>'
-            +     '</g>'
-            +   '</svg>'
-            + '</div></div></div>'
+            + '<div class="qa-board-daily-cat" aria-hidden="true" title="just here for vibes — click it"><div class="qa-cat-walker"><div class="qa-cat-sprite qa-cat-walk"><div class="qa-cat-pixel"></div></div></div></div>'
             + '<div class="qa-board-daily-actions">'
             +   '<label class="qa-board-daily-pet-toggle" for="qa-board-daily-show-pet"><input type="checkbox" id="qa-board-daily-show-pet" aria-label="Show Pet"><span>Show Pet</span></label>'
             +   '<button type="button" class="qa-board-daily-copy" id="qa-board-daily-copy" title="Copy summary for standup" aria-label="Copy summary">📋</button>'
             +   '<button type="button" class="qa-board-daily-refresh" id="qa-board-daily-refresh" title="Refresh (bypass cache)" aria-label="Refresh">↻</button>'
             + '</div>';
         anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+
+        const pixelEl = wrap.querySelector(".qa-cat-pixel");
+        if (pixelEl) pixelEl.style.setProperty("--qa-cat-shadow", QA_CAT_PIXEL_SHADOW);
+        const walkerEl = wrap.querySelector(".qa-cat-walker");
+        if (walkerEl) walkerEl.addEventListener("click", () => qaCatBounce(wrap));
 
         wrap.querySelector("#qa-board-daily-refresh").addEventListener("click", (e) => {
             e.preventDefault();
