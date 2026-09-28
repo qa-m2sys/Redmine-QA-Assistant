@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      7.2.21
+// @version      7.2.29
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -7800,6 +7800,248 @@ body.qa-selecting .agile-issue{
     color:#444;
 }
 
+/* ---------- Issue attributes mascot (issue detail page) ----------
+   Positioned entirely from JS (mountIssueCat() measures the real gap
+   between .attributes and its parent .issue.details) — this stylesheet
+   only supplies the art + sizing, never a guessed offset.
+   Sizing trick: font-size scales every em-based measurement below
+   (100px overall = font-size 1.25px, since the art is 80em wide). */
+.qa-issue-cat *,
+.qa-issue-cat *::before,
+.qa-issue-cat *::after{
+    position:absolute;
+    box-sizing:border-box;
+}
+.qa-issue-cat{
+    --fur:#222;
+    --fur-dark:#111;
+    --skin:pink;
+    font-size:1.25px;
+    width:80em;
+    aspect-ratio:1;
+    position:absolute;
+    box-sizing:border-box;
+    pointer-events:auto;
+    cursor:default;
+    z-index:1;
+}
+.qa-issue-cat-shadow{
+    width:80%;
+    height:5%;
+    background:#0002;
+    border-radius:50% / 0 0 100% 100%;
+    top:99%;
+    left:50%;
+    translate:-50%;
+}
+.qa-issue-cat-tail{
+    animation:qa-issue-cat-wag-tail 13s infinite;
+    transform-origin:20% 20%;
+    width:50%;
+    height:50%;
+    border-radius:50%;
+    border:7em solid #0000;
+    border-top-color:var(--fur-dark);
+    border-left-color:var(--fur-dark);
+    clip-path:polygon(100% 0, 100% 100%, 0 30%, 0 0);
+    top:75%;
+    left:52%;
+}
+.qa-issue-cat-tail::before{
+    content:"";
+    width:7em;
+    aspect-ratio:1;
+    background:var(--fur-dark);
+    border-radius:50%;
+    left:81%;
+    top:-9%;
+}
+.qa-issue-cat-body{
+    left:50%;
+    translate:-50%;
+    bottom:0;
+    width:35%;
+    height:40%;
+    background:
+        radial-gradient(100% 80% at 50% 0, var(--fur-dark) 50%, #0000 0),
+        var(--fur);
+    border-radius:100% / 200% 200% 20% 20%;
+}
+.qa-issue-cat-leg{
+    width:165%;
+    height:38%;
+    background:var(--fur);
+    bottom:0;
+    left:50%;
+    translate:-50%;
+    border-radius:8em 8em 100% 100% / 10em 10em 16em 16em;
+    scale:1 -1;
+}
+.qa-issue-cat-paw{
+    width:35%;
+    height:49%;
+    border:0.75em solid #fff;
+    border-top:0;
+    border-radius:0 0 5em 5em;
+    border-bottom:1em solid #fff;
+    top:48%;
+    rotate:-10deg;
+    left:10%;
+    clip-path:polygon(0 20%, 100% 30%, 100% 100%, 0 100%);
+}
+.qa-issue-cat-paw + .qa-issue-cat-paw{
+    right:7%;
+    height:50%;
+    left:auto;
+    rotate:13deg;
+    scale:-1 1;
+    clip-path:polygon(0 25%, 100% 15%, 100% 100%, 0 100%);
+}
+.qa-issue-cat-head{
+    width:80%;
+    aspect-ratio:1.1;
+    left:50%;
+    translate:-50%;
+    animation:qa-issue-cat-tilt-head 13s infinite;
+    transform-origin:50% 100%;
+}
+.qa-issue-cat-ear{
+    width:60%;
+    aspect-ratio:1;
+    border:4em solid var(--fur);
+    border-radius:5% 90% 10% 80%;
+    background:var(--skin);
+}
+.qa-issue-cat-ear + .qa-issue-cat-ear{
+    scale:-1 1;
+    right:0;
+    animation:qa-issue-cat-twitch 7.2s infinite;
+}
+.qa-issue-cat-face{
+    inset:0;
+    background:
+        linear-gradient(#0003, #0000 50%),
+        var(--fur);
+    border-radius:100% / 125% 125% 80% 75%;
+}
+.qa-issue-cat-whisker{
+    width:30%;
+    height:30%;
+    border-radius:50%;
+    border:2em solid #0000;
+    border-top-color:var(--fur);
+    border-left-color:var(--fur);
+    clip-path:polygon(100% 0, 100% 100%, 0 30%, 0 0);
+}
+.qa-issue-cat-whisker:nth-child(1){ top:70%; translate:-65%; }
+.qa-issue-cat-whisker:nth-child(2){ top:80%; translate:-40%; rotate:-20deg; }
+.qa-issue-cat-whisker:nth-child(3){ right:0%; top:70%; translate:65%; rotate:10deg; }
+.qa-issue-cat-whisker:nth-child(4){ right:0; top:80%; translate:40%; rotate:24deg; }
+.qa-issue-cat-nose{
+    width:10%;
+    height:7%;
+    background:var(--skin);
+    border-radius:50%;
+    left:50%;
+    translate:-50% -50%;
+    top:78%;
+}
+.qa-issue-cat-eye{
+    --pos:25%;
+    --x1:50%;
+    --x2:40%;
+    width:35%;
+    animation:qa-issue-cat-blink 5s infinite;
+    aspect-ratio:1;
+    border-radius:50%;
+    background:
+        radial-gradient(50% 50% at var(--x1) 47%, #fff 2.75em, #0000 calc(2.75em + 1px)),
+        radial-gradient(50% 50% at var(--x2) 65%, #fff 1.25em, #0000 calc(1.25em + 1px)),
+        radial-gradient(circle at 60% 55%, #000 7em, #0000 calc(7em + 1px)),
+        #fff;
+    left:var(--pos);
+    translate:-50% -50%;
+    top:63%;
+}
+.qa-issue-cat-eye + .qa-issue-cat-eye{
+    --x1:70%;
+    --x2:80%;
+    left:calc(100% - var(--pos));
+    scale:-1 1;
+}
+@keyframes qa-issue-cat-blink{
+    0%,20%,25%,100%{ aspect-ratio:1; }
+    22.5%{ aspect-ratio:10; }
+}
+@keyframes qa-issue-cat-tilt-head{
+    0%{ rotate:0deg; }
+    40%{ rotate:-10deg; }
+    75%{ rotate:4deg; }
+    100%{ rotate:0deg; }
+}
+@keyframes qa-issue-cat-wag-tail{
+    0%{ rotate:0deg; }
+    20%{ rotate:-6deg; }
+    75%{ rotate:4deg; }
+    100%{ rotate:0deg; }
+}
+@keyframes qa-issue-cat-twitch{
+    0%,87%,100%{ rotate:0deg; }
+    90%,94%,98%{ rotate:-2deg; }
+    88%,92%,96%{ rotate:2deg; }
+}
+@media (prefers-reduced-motion: reduce){
+    .qa-issue-cat,
+    .qa-issue-cat *{ animation:none !important; }
+}
+.qa-issue-cat-bubble{
+    position:absolute;
+    bottom:100%;
+    left:50%;
+    margin-bottom:14px;
+    padding:7px 16px;
+    background:#fff;
+    color:#333;
+    border:1px solid #ddd;
+    border-radius:18px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    font-size:16px;
+    font-weight:600;
+    white-space:nowrap;
+    box-shadow:0 4px 12px rgba(0,0,0,.15);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .15s ease, transform .15s ease;
+    transform:translate(-50%, 4px) scale(0.85);
+    transform-origin:bottom center;
+    z-index:2;
+}
+.qa-issue-cat-bubble::before,
+.qa-issue-cat-bubble::after{
+    content:"";
+    position:absolute;
+    background:#fff;
+    border:1px solid #ddd;
+    border-radius:50%;
+}
+.qa-issue-cat-bubble::before{ width:10px; height:10px; bottom:-14px; left:50%; margin-left:-5px; }
+.qa-issue-cat-bubble::after{  width:6px; height:6px; bottom:-22px; left:50%; margin-left:-3px; }
+.qa-issue-cat:hover .qa-issue-cat-bubble{
+    opacity:1;
+    transform:translate(-50%, 0) scale(1);
+}
+.qa-issue-cat-toggle{
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+    margin-right:10px;
+    font-size:12px;
+    color:#767676;
+    cursor:pointer;
+    user-select:none;
+}
+.qa-issue-cat-toggle input{ cursor:pointer; }
+
 /* ---------- Attachment lightbox (issue detail pages) ----------
    Lives outside #qa-panel scope — pure static styling. Intercepts clicks
    on image/video attachment links so users can flip through them without
@@ -8686,6 +8928,157 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
         const root = document.getElementById("content") || document.body;
         if (!root) return;
         const mo = new MutationObserver(() => mountIssueLinkCopyButton());
+        mo.observe(root, { childList: true, subtree: true });
+    }
+
+    //////////////////////////////////////////////////////
+    // Issue attributes mascot (issue detail page)
+    //////////////////////////////////////////////////////
+
+    // Purely decorative CSS-art cat, tucked beside the Start date / Due date /
+    // % Done column. That column's own .value boxes stretch to fill the row
+    // (Redmine's CSS), so the visible blank space is inside them, past the
+    // actual rendered text — a Range gives the text's real extent since the
+    // div itself reports full-row width regardless of content length.
+    const QA_ISSUE_CAT_SIZE = 100; // keep in sync with .qa-issue-cat width in content.css
+    const QA_ISSUE_CAT_GAP = 256;
+    const QA_ISSUE_CAT_SHOW_KEY = "qa.issueCat.show.v1";
+
+    function qaIssueCatShowLoad() {
+        try { return localStorage.getItem(QA_ISSUE_CAT_SHOW_KEY) === "1"; }
+        catch (_) { return false; }
+    }
+    function qaIssueCatShowSave(on) {
+        try { localStorage.setItem(QA_ISSUE_CAT_SHOW_KEY, on ? "1" : "0"); } catch (_) { /* quota */ }
+    }
+
+    // "Show Cat" checkbox state — off by default; the mascot only ever
+    // appears once the user opts in, even when there's room for it.
+    let qaIssueCatWanted = false;
+
+    function qaIssueCatApplyVisibility() {
+        const cat = document.querySelector(".qa-issue-cat");
+        if (!cat) return;
+        cat.style.display = (qaIssueCatWanted && cat.dataset.hasRoom === "1") ? "" : "none";
+    }
+
+    function qaTextRightEdge(el) {
+        try {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            let right = el.getBoundingClientRect().left;
+            for (const r of range.getClientRects()) {
+                if (r.width && r.right > right) right = r.right;
+            }
+            return right;
+        } catch (_) {
+            return el.getBoundingClientRect().right;
+        }
+    }
+
+    function mountIssueCat() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        const attrs = document.querySelector(".attributes");
+        const startDate = attrs && attrs.querySelector(".start-date.attribute");
+        const column = startDate && startDate.closest(".splitcontentleft, .splitcontentright");
+        if (!attrs || !column || attrs.dataset.qaCat === "1") return;
+        attrs.dataset.qaCat = "1";
+        if (getComputedStyle(attrs).position === "static") attrs.style.position = "relative";
+
+        const cat = document.createElement("div");
+        cat.className = "qa-issue-cat";
+        cat.setAttribute("aria-hidden", "true");
+        cat.title = "just a friendly office cat";
+        cat.innerHTML =
+            '<div class="qa-issue-cat-shadow"></div>'
+            + '<div class="qa-issue-cat-tail"></div>'
+            + '<div class="qa-issue-cat-body">'
+            +   '<div class="qa-issue-cat-leg"></div>'
+            +   '<div class="qa-issue-cat-leg"></div>'
+            +   '<div class="qa-issue-cat-paw"></div>'
+            +   '<div class="qa-issue-cat-paw"></div>'
+            + '</div>'
+            + '<div class="qa-issue-cat-head">'
+            +   '<div class="qa-issue-cat-ear"></div>'
+            +   '<div class="qa-issue-cat-ear"></div>'
+            +   '<div class="qa-issue-cat-face">'
+            +     '<div class="qa-issue-cat-whisker"></div>'
+            +     '<div class="qa-issue-cat-whisker"></div>'
+            +     '<div class="qa-issue-cat-whisker"></div>'
+            +     '<div class="qa-issue-cat-whisker"></div>'
+            +     '<div class="qa-issue-cat-eye"></div>'
+            +     '<div class="qa-issue-cat-eye"></div>'
+            +     '<div class="qa-issue-cat-nose"></div>'
+            +   '</div>'
+            + '</div>'
+            + '<div class="qa-issue-cat-bubble">Meow</div>';
+        attrs.appendChild(cat);
+
+        const place = () => {
+            const attrsRect = attrs.getBoundingClientRect();
+            const columnRect = column.getBoundingClientRect();
+            let contentRight = columnRect.left;
+            column.querySelectorAll(".attribute .value").forEach((v) => {
+                // % Done renders its progress-bar <table> at full row width
+                // regardless of the percentage — not a text-width signal.
+                if (v.querySelector("table")) return;
+                const r = qaTextRightEdge(v);
+                if (r > contentRight) contentRight = r;
+            });
+            const roomRight = columnRect.right - contentRight;
+            const hasRoom = !(roomRight < QA_ISSUE_CAT_SIZE + QA_ISSUE_CAT_GAP
+                || attrsRect.height < QA_ISSUE_CAT_SIZE);
+            cat.dataset.hasRoom = hasRoom ? "1" : "0";
+            if (hasRoom) {
+                cat.style.left = Math.round(contentRight - attrsRect.left + QA_ISSUE_CAT_GAP) + "px";
+                cat.style.top  = Math.round(columnRect.top - attrsRect.top) + "px";
+            }
+            qaIssueCatApplyVisibility();
+        };
+        place();
+        window.addEventListener("resize", place);
+    }
+
+    // "Show Cat" checkbox, inserted left of the Edit pencil icon in the
+    // issue's top contextual toolbar. Mirrors the agile board's "Show Pet"
+    // toggle — off by default, persisted per browser.
+    function mountIssueCatToggle() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        const bar = document.querySelector("#content > .contextual");
+        if (!bar || bar.dataset.qaCatToggle === "1") return;
+        bar.dataset.qaCatToggle = "1";
+
+        const label = document.createElement("label");
+        label.className = "qa-issue-cat-toggle";
+        label.innerHTML = '<input type="checkbox" id="qa-issue-cat-show"> Show Cat';
+        bar.insertBefore(label, bar.firstChild);
+
+        const checkbox = label.querySelector("input");
+        qaIssueCatWanted = qaIssueCatShowLoad();
+        checkbox.checked = qaIssueCatWanted;
+        qaIssueCatApplyVisibility();
+
+        checkbox.addEventListener("change", () => {
+            qaIssueCatWanted = checkbox.checked;
+            qaIssueCatShowSave(qaIssueCatWanted);
+            qaIssueCatApplyVisibility();
+        });
+    }
+
+    // Attributes panel can re-render (inline edit, tab switch); re-mount if needed.
+    function observeIssueCat() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        mountIssueCat();
+        mountIssueCatToggle();
+        const root = document.getElementById("content") || document.body;
+        if (!root) return;
+        const mo = new MutationObserver(() => {
+            mountIssueCat();
+            mountIssueCatToggle();
+        });
         mo.observe(root, { childList: true, subtree: true });
     }
 
@@ -9871,6 +10264,7 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
         rememberCurrentBoard();
         observeChecklistSection();
         observeIssueHeader();
+        observeIssueCat();
         observeRelatedIssues();
         installAttachmentLightbox();
         observeBoardDailyReport();

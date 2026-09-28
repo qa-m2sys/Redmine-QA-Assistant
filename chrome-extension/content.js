@@ -5550,6 +5550,157 @@ As a <role>, I want <goal> so that <benefit>.
         mo.observe(root, { childList: true, subtree: true });
     }
 
+    //////////////////////////////////////////////////////
+    // Issue attributes mascot (issue detail page)
+    //////////////////////////////////////////////////////
+
+    // Purely decorative CSS-art cat, tucked beside the Start date / Due date /
+    // % Done column. That column's own .value boxes stretch to fill the row
+    // (Redmine's CSS), so the visible blank space is inside them, past the
+    // actual rendered text — a Range gives the text's real extent since the
+    // div itself reports full-row width regardless of content length.
+    const QA_ISSUE_CAT_SIZE = 100; // keep in sync with .qa-issue-cat width in content.css
+    const QA_ISSUE_CAT_GAP = 256;
+    const QA_ISSUE_CAT_SHOW_KEY = "qa.issueCat.show.v1";
+
+    function qaIssueCatShowLoad() {
+        try { return localStorage.getItem(QA_ISSUE_CAT_SHOW_KEY) === "1"; }
+        catch (_) { return false; }
+    }
+    function qaIssueCatShowSave(on) {
+        try { localStorage.setItem(QA_ISSUE_CAT_SHOW_KEY, on ? "1" : "0"); } catch (_) { /* quota */ }
+    }
+
+    // "Show Cat" checkbox state — off by default; the mascot only ever
+    // appears once the user opts in, even when there's room for it.
+    let qaIssueCatWanted = false;
+
+    function qaIssueCatApplyVisibility() {
+        const cat = document.querySelector(".qa-issue-cat");
+        if (!cat) return;
+        cat.style.display = (qaIssueCatWanted && cat.dataset.hasRoom === "1") ? "" : "none";
+    }
+
+    function qaTextRightEdge(el) {
+        try {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            let right = el.getBoundingClientRect().left;
+            for (const r of range.getClientRects()) {
+                if (r.width && r.right > right) right = r.right;
+            }
+            return right;
+        } catch (_) {
+            return el.getBoundingClientRect().right;
+        }
+    }
+
+    function mountIssueCat() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        const attrs = document.querySelector(".attributes");
+        const startDate = attrs && attrs.querySelector(".start-date.attribute");
+        const column = startDate && startDate.closest(".splitcontentleft, .splitcontentright");
+        if (!attrs || !column || attrs.dataset.qaCat === "1") return;
+        attrs.dataset.qaCat = "1";
+        if (getComputedStyle(attrs).position === "static") attrs.style.position = "relative";
+
+        const cat = document.createElement("div");
+        cat.className = "qa-issue-cat";
+        cat.setAttribute("aria-hidden", "true");
+        cat.title = "just a friendly office cat";
+        cat.innerHTML =
+            '<div class="qa-issue-cat-shadow"></div>'
+            + '<div class="qa-issue-cat-tail"></div>'
+            + '<div class="qa-issue-cat-body">'
+            +   '<div class="qa-issue-cat-leg"></div>'
+            +   '<div class="qa-issue-cat-leg"></div>'
+            +   '<div class="qa-issue-cat-paw"></div>'
+            +   '<div class="qa-issue-cat-paw"></div>'
+            + '</div>'
+            + '<div class="qa-issue-cat-head">'
+            +   '<div class="qa-issue-cat-ear"></div>'
+            +   '<div class="qa-issue-cat-ear"></div>'
+            +   '<div class="qa-issue-cat-face">'
+            +     '<div class="qa-issue-cat-whisker"></div>'
+            +     '<div class="qa-issue-cat-whisker"></div>'
+            +     '<div class="qa-issue-cat-whisker"></div>'
+            +     '<div class="qa-issue-cat-whisker"></div>'
+            +     '<div class="qa-issue-cat-eye"></div>'
+            +     '<div class="qa-issue-cat-eye"></div>'
+            +     '<div class="qa-issue-cat-nose"></div>'
+            +   '</div>'
+            + '</div>'
+            + '<div class="qa-issue-cat-bubble">Meow</div>';
+        attrs.appendChild(cat);
+
+        const place = () => {
+            const attrsRect = attrs.getBoundingClientRect();
+            const columnRect = column.getBoundingClientRect();
+            let contentRight = columnRect.left;
+            column.querySelectorAll(".attribute .value").forEach((v) => {
+                // % Done renders its progress-bar <table> at full row width
+                // regardless of the percentage — not a text-width signal.
+                if (v.querySelector("table")) return;
+                const r = qaTextRightEdge(v);
+                if (r > contentRight) contentRight = r;
+            });
+            const roomRight = columnRect.right - contentRight;
+            const hasRoom = !(roomRight < QA_ISSUE_CAT_SIZE + QA_ISSUE_CAT_GAP
+                || attrsRect.height < QA_ISSUE_CAT_SIZE);
+            cat.dataset.hasRoom = hasRoom ? "1" : "0";
+            if (hasRoom) {
+                cat.style.left = Math.round(contentRight - attrsRect.left + QA_ISSUE_CAT_GAP) + "px";
+                cat.style.top  = Math.round(columnRect.top - attrsRect.top) + "px";
+            }
+            qaIssueCatApplyVisibility();
+        };
+        place();
+        window.addEventListener("resize", place);
+    }
+
+    // "Show Cat" checkbox, inserted left of the Edit pencil icon in the
+    // issue's top contextual toolbar. Mirrors the agile board's "Show Pet"
+    // toggle — off by default, persisted per browser.
+    function mountIssueCatToggle() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        const bar = document.querySelector("#content > .contextual");
+        if (!bar || bar.dataset.qaCatToggle === "1") return;
+        bar.dataset.qaCatToggle = "1";
+
+        const label = document.createElement("label");
+        label.className = "qa-issue-cat-toggle";
+        label.innerHTML = '<input type="checkbox" id="qa-issue-cat-show"> Show Cat';
+        bar.insertBefore(label, bar.firstChild);
+
+        const checkbox = label.querySelector("input");
+        qaIssueCatWanted = qaIssueCatShowLoad();
+        checkbox.checked = qaIssueCatWanted;
+        qaIssueCatApplyVisibility();
+
+        checkbox.addEventListener("change", () => {
+            qaIssueCatWanted = checkbox.checked;
+            qaIssueCatShowSave(qaIssueCatWanted);
+            qaIssueCatApplyVisibility();
+        });
+    }
+
+    // Attributes panel can re-render (inline edit, tab switch); re-mount if needed.
+    function observeIssueCat() {
+        if (location.origin !== REDMINE) return;
+        if (!isIssueDetailPage()) return;
+        mountIssueCat();
+        mountIssueCatToggle();
+        const root = document.getElementById("content") || document.body;
+        if (!root) return;
+        const mo = new MutationObserver(() => {
+            mountIssueCat();
+            mountIssueCatToggle();
+        });
+        mo.observe(root, { childList: true, subtree: true });
+    }
+
     // Related issues table is native Redmine markup with no author column —
     // one lightweight JSON fetch per related issue fills it in inline.
     function mountRelatedIssueAuthors() {
@@ -6746,6 +6897,7 @@ As a <role>, I want <goal> so that <benefit>.
         rememberCurrentBoard();
         observeChecklistSection();
         observeIssueHeader();
+        observeIssueCat();
         observeRelatedIssues();
         installAttachmentLightbox();
         observeBoardDailyReport();

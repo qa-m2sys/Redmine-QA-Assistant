@@ -5,7 +5,86 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.21 — current
+## Version 7.2.29 — current
+
+### 🐱 Bigger "Meow" bubble
+Larger padding, font size, and tail circles so the hover bubble reads
+more comfortably.
+
+---
+
+## Version 7.2.28
+
+### 🐱 The issue attributes cat says "Meow"
+Hover it and a little thought bubble pops up with "Meow" inside; move the
+cursor away and it pops back out. Pure CSS (no JS) — the bubble reveal is
+driven entirely by `:hover`.
+
+---
+
+## Version 7.2.27
+
+### 🐱 Issue attributes mascot is now opt-in
+Added a "Show Cat" checkbox to the left of the Edit pencil icon on issue
+detail pages, mirroring the agile board's "Show Pet" toggle. Off by
+default and persisted per browser — the mascot only appears once you tick
+it (and only where there's actually room).
+
+---
+
+## Version 7.2.26
+
+### 🐱 Issue attributes mascot moved further out (256px)
+Also decoupled the visibility threshold from the gap size — it previously
+required room for size + gap + a fixed 70px buffer, which would have hidden
+the cat again once the gap itself grew past what's actually available.
+
+---
+
+## Version 7.2.25
+
+### 🐱 Nudged the issue attributes mascot further right
+It was sitting close enough to overlap the % Done progress bar; the gap
+between the attribute text and the cat is now 48px (was 16px).
+
+---
+
+## Version 7.2.24
+
+### 🐱 Fixed: mascot still hidden — the % Done progress bar was the culprit
+The room calculation took the widest of Start date / Due date / % Done's
+rendered content, but % Done's progress-bar `<table>` renders at the full
+row width no matter what percentage it shows — so it always reported zero
+blank space. Progress-bar values are now excluded from that measurement;
+only Start date / Due date's actual (short) text counts.
+
+---
+
+## Version 7.2.23
+
+### 🐱 Fixed: issue attributes mascot wasn't showing up
+7.2.22 measured blank space between `.attributes` and its parent box, but
+on this theme `.attributes` already stretches almost to that box's edge —
+the real blank space is *inside* the Start date / Due date / % Done column,
+past the actual rendered text (Redmine's `.value` boxes stretch to fill the
+row regardless of how short the text is). Now measures the text's real
+extent directly and anchors there instead.
+
+---
+
+## Version 7.2.22
+
+### 🐱 A second cat, now on the issue detail page
+A small CSS-art kawaii cat (idle head-tilt, tail wag, ear twitch, blink)
+now sits in the blank space beside the issue attributes box (Status,
+Start date, Closed Version, ...) on issue detail pages. Its position is
+measured at runtime against the actual rendered layout, so it only shows
+up — and only where there's genuinely room — regardless of theme or
+window width.
+
+---
+
+## Version 7.2.21
 
 ### 🐾 Click the agile-board cat to make it jump
 The pixel cat now responds to clicks with a little hop, on top of its usual
