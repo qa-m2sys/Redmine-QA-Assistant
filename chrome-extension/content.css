@@ -1860,6 +1860,7 @@ body.qa-selecting .agile-issue{
     line-height:1.4;
     white-space:pre-wrap;
     word-break:break-word;
+    user-select:text;
 }
 .qa-bubble-user{
     align-self:flex-end;
@@ -2334,16 +2335,18 @@ body.qa-selecting .agile-issue{
 .qa-issue-copy-btn:focus-visible{ outline:2px solid #4f8cff; outline-offset:2px; }
 
 /* Author name appended to each row of Redmine's native "Related issues"
-   table — fetched separately since that table has no author column. */
+   table — fetched separately since that table has no author column.
+   Background/color are set inline per-author (see qaRelationAuthorColor). */
 .qa-relation-author{
-    color:#767676;
-    font-size:12px;
-    font-style:italic;
+    display:inline-block;
+    padding:1px 8px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:600;
+    line-height:1.6;
     margin-left:4px;
-}
-.qa-relation-author strong{
-    font-weight:700;
-    color:#444;
+    white-space:nowrap;
+    vertical-align:middle;
 }
 
 /* ---------- Issue attributes mascot (issue detail page) ----------

@@ -5,7 +5,49 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.29 — current
+## Version 7.2.33 — current
+
+### 🎨 Fixed: author pills could still land on near-identical colors
+7.2.32 hashed each name to a hue independently, so two unrelated names
+could still land close enough together (e.g. both landing in the pink/
+magenta range) to look like the same color. Hues are now assigned in
+first-seen order using the golden-angle increment (~137.5°) — the
+standard technique for spreading N colors maximally far apart — so
+authors appearing together on the same page always look clearly distinct.
+
+---
+
+## Version 7.2.32
+
+### 🎨 Author pills: more distinct colors
+The 8-color fixed palette from 7.2.31 meant any team with more than 8
+people started reusing colors. Colors are now generated per-author from
+a hue (0-360°) derived directly from their name, so distinct authors get
+genuinely distinct colors instead of collapsing into shared buckets.
+
+---
+
+## Version 7.2.31
+
+### 🎴 Color-coded author pills on Related Issues
+The author name appended to each "Related issues" row is now a small
+rounded pill instead of plain italic text. Each author gets a consistent
+pastel color (picked deterministically from their name, from an 8-color
+palette), so issues filed by the same person are easy to spot at a glance.
+
+---
+
+## Version 7.2.30
+
+### 💬 AI chat messages are now selectable
+`#qa-panel` disables text selection panel-wide (so dragging the header
+doesn't select text) — that was also blocking selection inside the AI
+chat bubbles. Chat messages (yours and the AI's) can now be selected and
+copied.
+
+---
+
+## Version 7.2.29
 
 ### 🐱 Bigger "Meow" bubble
 Larger padding, font size, and tail circles so the hover bubble reads

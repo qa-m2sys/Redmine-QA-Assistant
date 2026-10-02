@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      7.2.29
+// @version      7.2.33
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -7314,6 +7314,7 @@ body.qa-selecting .agile-issue{
     line-height:1.4;
     white-space:pre-wrap;
     word-break:break-word;
+    user-select:text;
 }
 .qa-bubble-user{
     align-self:flex-end;
@@ -7788,16 +7789,18 @@ body.qa-selecting .agile-issue{
 .qa-issue-copy-btn:focus-visible{ outline:2px solid #4f8cff; outline-offset:2px; }
 
 /* Author name appended to each row of Redmine's native "Related issues"
-   table — fetched separately since that table has no author column. */
+   table — fetched separately since that table has no author column.
+   Background/color are set inline per-author (see qaRelationAuthorColor). */
 .qa-relation-author{
-    color:#767676;
-    font-size:12px;
-    font-style:italic;
+    display:inline-block;
+    padding:1px 8px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:600;
+    line-height:1.6;
     margin-left:4px;
-}
-.qa-relation-author strong{
-    font-weight:700;
-    color:#444;
+    white-space:nowrap;
+    vertical-align:middle;
 }
 
 /* ---------- Issue attributes mascot (issue detail page) ----------
@@ -9082,6 +9085,23 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
         mo.observe(root, { childList: true, subtree: true });
     }
 
+    // Hashing each name independently (previous approach) can land two
+    // unrelated names on visually similar hues by pure chance. Instead, hues
+    // are assigned in first-seen order using the golden-angle increment
+    // (~137.5°), which is the standard trick for spreading any number of
+    // colors maximally far apart around the wheel — so whichever authors
+    // actually appear together on a page always look clearly distinct.
+    const qaRelationAuthorHues = new Map();
+    let qaRelationAuthorHueSeed = 0;
+    function qaRelationAuthorColor(name) {
+        if (!qaRelationAuthorHues.has(name)) {
+            qaRelationAuthorHues.set(name, Math.round((qaRelationAuthorHueSeed * 137.508) % 360));
+            qaRelationAuthorHueSeed++;
+        }
+        const hue = qaRelationAuthorHues.get(name);
+        return { bg: "hsl(" + hue + ", 70%, 90%)", fg: "hsl(" + hue + ", 65%, 28%)" };
+    }
+
     // Related issues table is native Redmine markup with no author column —
     // one lightweight JSON fetch per related issue fills it in inline.
     function mountRelatedIssueAuthors() {
@@ -9107,13 +9127,14 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
                     const authorLink = doc.querySelector(".author a.user");
                     const author = authorLink ? authorLink.textContent.trim() : "";
                     if (!author) return;
-                    const span = document.createElement("span");
-                    span.className = "qa-relation-author";
-                    span.append("— ");
-                    const strong = document.createElement("strong");
-                    strong.textContent = author;
-                    span.appendChild(strong);
-                    subjectCell.appendChild(span);
+                    const color = qaRelationAuthorColor(author);
+                    const pill = document.createElement("span");
+                    pill.className = "qa-relation-author";
+                    pill.textContent = author;
+                    pill.style.background = color.bg;
+                    pill.style.color = color.fg;
+                    subjectCell.appendChild(document.createTextNode(" "));
+                    subjectCell.appendChild(pill);
                 })
                 .catch(() => {});
         });

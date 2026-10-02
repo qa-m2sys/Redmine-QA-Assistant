@@ -5701,6 +5701,23 @@ As a <role>, I want <goal> so that <benefit>.
         mo.observe(root, { childList: true, subtree: true });
     }
 
+    // Hashing each name independently (previous approach) can land two
+    // unrelated names on visually similar hues by pure chance. Instead, hues
+    // are assigned in first-seen order using the golden-angle increment
+    // (~137.5°), which is the standard trick for spreading any number of
+    // colors maximally far apart around the wheel — so whichever authors
+    // actually appear together on a page always look clearly distinct.
+    const qaRelationAuthorHues = new Map();
+    let qaRelationAuthorHueSeed = 0;
+    function qaRelationAuthorColor(name) {
+        if (!qaRelationAuthorHues.has(name)) {
+            qaRelationAuthorHues.set(name, Math.round((qaRelationAuthorHueSeed * 137.508) % 360));
+            qaRelationAuthorHueSeed++;
+        }
+        const hue = qaRelationAuthorHues.get(name);
+        return { bg: "hsl(" + hue + ", 70%, 90%)", fg: "hsl(" + hue + ", 65%, 28%)" };
+    }
+
     // Related issues table is native Redmine markup with no author column —
     // one lightweight JSON fetch per related issue fills it in inline.
     function mountRelatedIssueAuthors() {
@@ -5726,13 +5743,14 @@ As a <role>, I want <goal> so that <benefit>.
                     const authorLink = doc.querySelector(".author a.user");
                     const author = authorLink ? authorLink.textContent.trim() : "";
                     if (!author) return;
-                    const span = document.createElement("span");
-                    span.className = "qa-relation-author";
-                    span.append("— ");
-                    const strong = document.createElement("strong");
-                    strong.textContent = author;
-                    span.appendChild(strong);
-                    subjectCell.appendChild(span);
+                    const color = qaRelationAuthorColor(author);
+                    const pill = document.createElement("span");
+                    pill.className = "qa-relation-author";
+                    pill.textContent = author;
+                    pill.style.background = color.bg;
+                    pill.style.color = color.fg;
+                    subjectCell.appendChild(document.createTextNode(" "));
+                    subjectCell.appendChild(pill);
                 })
                 .catch(() => {});
         });
