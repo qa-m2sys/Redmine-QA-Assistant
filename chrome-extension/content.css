@@ -3231,6 +3231,25 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
     padding:0 4px;
 }
 .qa-board-daily-modal-close:hover{ color:#111; }
+.qa-board-daily-modal-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:8px;
+    padding:12px 18px;
+    border-top:1px solid rgba(0,0,0,0.08);
+}
+.qa-board-daily-modal-actions button{
+    background:#f0f2f5;
+    border:1px solid rgba(0,0,0,0.1);
+    border-radius:6px;
+    padding:6px 14px;
+    font-size:12px;
+    font-weight:600;
+    color:#333;
+    cursor:pointer;
+}
+.qa-board-daily-modal-actions button:hover{ background:#e4e7ec; }
+.qa-board-daily-modal-actions button:disabled{ opacity:.5; cursor:default; }
 .qa-board-daily-modal-body{
     padding:16px 18px;
     overflow:auto;

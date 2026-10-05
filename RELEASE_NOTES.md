@@ -5,7 +5,16 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.33 — current
+## Version 7.2.34 — current
+
+### 📋 Copy buttons on the QA weekly leaderboard
+Added "Copy" (Markdown table) and "Copy plain" (aligned plain text) buttons
+to the weekly leaderboard modal, matching the sprint audit modal's pattern.
+Both stay disabled until the data finishes loading.
+
+---
+
+## Version 7.2.33
 
 ### 🎨 Fixed: author pills could still land on near-identical colors
 7.2.32 hashed each name to a hue independently, so two unrelated names

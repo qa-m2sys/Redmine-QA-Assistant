@@ -6703,6 +6703,10 @@ As a <role>, I want <goal> so that <benefit>.
             +     '<button type="button" class="qa-board-daily-modal-close" aria-label="Close">×</button>'
             +   '</div>'
             +   '<div class="qa-board-daily-modal-body" id="qa-board-daily-week-body">Loading…</div>'
+            +   '<div class="qa-board-daily-modal-actions">'
+            +     '<button type="button" id="qa-board-daily-week-copy" disabled>Copy</button>'
+            +     '<button type="button" id="qa-board-daily-week-copy-plain" disabled>Copy plain</button>'
+            +   '</div>'
             + '</div>';
         document.body.appendChild(overlay);
 
@@ -6711,6 +6715,24 @@ As a <role>, I want <goal> so that <benefit>.
         overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
         const escHandler = (e) => { if (e.key === "Escape") { close(); document.removeEventListener("keydown", escHandler); } };
         document.addEventListener("keydown", escHandler);
+
+        let lastData = null;
+        const copyBtn = overlay.querySelector("#qa-board-daily-week-copy");
+        const copyPlainBtn = overlay.querySelector("#qa-board-daily-week-copy-plain");
+        copyBtn.addEventListener("click", async () => {
+            if (!lastData) return;
+            try {
+                await navigator.clipboard.writeText(buildQaWeeklyLeaderboardMarkdown(lastData));
+                toast("Leaderboard copied");
+            } catch (_) { toast("Copy failed — clipboard blocked"); }
+        });
+        copyPlainBtn.addEventListener("click", async () => {
+            if (!lastData) return;
+            try {
+                await navigator.clipboard.writeText(buildQaWeeklyLeaderboardPlain(lastData));
+                toast("Leaderboard copied (plain text)");
+            } catch (_) { toast("Copy failed — clipboard blocked"); }
+        });
 
         (async () => {
             const start = qaDailyWindowStart();
@@ -6729,9 +6751,49 @@ As a <role>, I want <goal> so that <benefit>.
                     return;
                 }
             }
+            lastData = data;
+            copyBtn.disabled = false;
+            copyPlainBtn.disabled = false;
             renderQaWeeklyLeaderboard(data, overlay);
         })();
     }
+
+    // Sorted { name, row } list shared by the rendered table and both copy
+    // formats, so all three always agree on row order.
+    function qaWeeklyLeaderboardRows(data) {
+        return QA_TEAM_MEMBERS
+            .map(n => ({ n, row: data.byAuthor[n] || { daily: new Array(7).fill(0), total: 0 } }))
+            .sort((a, b) => b.row.total - a.row.total);
+    }
+
+    function buildQaWeeklyLeaderboardMarkdown(data) {
+        const lines = ["# QA weekly leaderboard", ""];
+        const header = ["Name"].concat(data.days.map(d => d.dow), "Total");
+        lines.push("| " + header.join(" | ") + " |");
+        lines.push("|" + header.map((_, i) => i === 0 ? " --- " : " ---: ").join("|") + "|");
+        qaWeeklyLeaderboardRows(data).forEach(({ n, row }) => {
+            lines.push("| " + [n].concat(row.daily.map(String), String(row.total)).join(" | ") + " |");
+        });
+        lines.push("", "Rightmost column is the current 10:00 window.");
+        return lines.join("\n") + "\n";
+    }
+
+    function buildQaWeeklyLeaderboardPlain(data) {
+        const rows = qaWeeklyLeaderboardRows(data);
+        const nameW = Math.max.apply(null, rows.map(r => r.n.length).concat([4]));
+        const colW = 5;
+        const title = "QA weekly leaderboard";
+        const lines = [title, "=".repeat(title.length), ""];
+        lines.push(" ".repeat(nameW) + "  " + data.days.map(d => d.dow.padStart(colW)).join("") + "  " + "Total".padStart(colW));
+        rows.forEach(({ n, row }) => {
+            const name = n + " ".repeat(nameW - n.length);
+            const cells = row.daily.map(v => String(v).padStart(colW)).join("");
+            lines.push("  " + name + "  " + cells + "  " + String(row.total).padStart(colW));
+        });
+        lines.push("", "Rightmost column is the current 10:00 window. Cell shade scales to the busiest cell of the week.");
+        return lines.join("\n") + "\n";
+    }
+
 
     function renderQaWeeklyLeaderboard(data, overlay) {
         const body = overlay.querySelector("#qa-board-daily-week-body");
