@@ -5,7 +5,29 @@ For features and usage, see the [README](README.md).
 
 ---
 
-## Version 7.2.34 — current
+## Version 8.0.0 — current
+
+### 🎬 Step Recorder (launcher panel)
+On launcher hosts (e.g. dev.cloudapper.com, anywhere other than Redmine
+itself), the panel now has a Step Recorder. Press **Start Recording**, use
+the app under test, press **Stop Recording**, and get a plain-English,
+numbered list of what happened — ready to paste into a bug report.
+
+Always captured: clicks (with smart "Opened"/"Clicked the link"/"Clicked"
+phrasing), typed text, checkbox/radio/select changes, drag-and-drop (both
+native HTML5 drags and plain-mouse drags), Escape key presses, scroll
+gestures (summarized once per gesture, not per scroll event), and page
+navigations.
+
+Opt-in (via a checkbox, since it's noisier): hover dwell on interactive
+elements and Tab-key focus changes.
+
+Use **Copy** to grab the numbered steps as text, or **Clear** to start over.
+This is a major feature addition, hence the v8.0.0 jump.
+
+---
+
+## Version 7.2.34
 
 ### 📋 Copy buttons on the QA weekly leaderboard
 Added "Copy" (Markdown table) and "Copy plain" (aligned plain text) buttons

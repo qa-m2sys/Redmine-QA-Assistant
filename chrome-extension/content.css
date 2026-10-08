@@ -1358,6 +1358,27 @@
 .qa-reopened-row .qa-tmpl-btn{
     flex:1 1 auto;
 }
+/* Step Recorder (launcher hosts only). */
+.qa-steprec-extra-toggle{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    margin:6px 2px 2px;
+    font-size:11px;
+    color:var(--qa-muted);
+    cursor:pointer;
+    user-select:none;
+}
+.qa-steprec-extra-toggle input{ cursor:pointer; }
+.qa-steprec-output{ margin-top:8px; }
+@keyframes qa-steprec-pulse{
+    0%,100%{ opacity:1; }
+    50%    { opacity:.4; }
+}
+.qa-steprec-toggle.qa-recording .qa-btn-icon{ animation:qa-steprec-pulse 1.1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce){
+    .qa-steprec-toggle.qa-recording .qa-btn-icon{ animation:none; }
+}
 /* Loader state — while `#qa-show-reopened.qa-loading` is applied by the
    click handler, spin the button's icon so users get an unambiguous
    "yes, work is happening" signal during the multi-second sprint scan.

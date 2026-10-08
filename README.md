@@ -19,7 +19,7 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
 | Site | What the panel does there |
 |------|---------------------------|
 | `https://redmine.kernello.com/*` | **Full assistant** — pick tracker + project, auto-fill the form, use AI, copy/clear, open boards. |
-| `https://dev.cloudapper.com/*` | **Launcher mode** — pick tracker + project and it opens the matching Redmine New-issue form in a new tab, so you can report a bug or open a board without leaving the app you're testing. |
+| `https://dev.cloudapper.com/*` | **Launcher mode** — pick tracker + project and it opens the matching Redmine New-issue form in a new tab, so you can report a bug or open a board without leaving the app you're testing. Also gains the **Step Recorder** (see below). |
 
 ---
 
@@ -117,6 +117,13 @@ A floating, draggable panel that lives on top of Redmine (and the app under test
   out; double-click resets to 100%. Not shown for video attachments.
 - Other attachment types (PDF, docx, zip, etc.) are unaffected — they still
   open or download exactly as before.
+
+### 🎬 Step Recorder (launcher mode)
+- On launcher hosts (e.g. `dev.cloudapper.com` — anywhere other than Redmine itself), the panel gains a **Step Recorder** section.
+- Press **Start Recording**, use the app under test, press **Stop Recording** — you get a plain-English, numbered list of what happened, ready to paste into a bug report.
+- Always captured: clicks (with smart "Opened"/"Clicked the link"/"Clicked" phrasing), typed text, checkbox/radio/select changes, drag-and-drop (native HTML5 and plain-mouse drags), Escape key presses, scroll gestures (summarized once per gesture), and page navigations.
+- **Opt-in** via a checkbox (more detail, more noise): hover dwell on interactive elements and Tab-key focus changes.
+- **Copy** grabs the numbered steps as text; **Clear** starts over.
 
 ### ✅ Close an issue in one click
 - New **"Close this issue"** section that appears on any Redmine issue detail page (`/issues/<n>`).
@@ -271,6 +278,16 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for a full history of what changed in e
   finishes so you can review every row; the *Close window* button reloads
   the board so closed cards actually disappear — with no browser
   reload-confirmation prompt at any point.
+- **Step Recorder (launcher mode)** — On non-Redmine hosts (e.g.
+  `dev.cloudapper.com`), the panel gains a *Step Recorder* section. Press
+  **Start Recording**, interact with the app under test, press **Stop
+  Recording**, and get a plain-English numbered list of what you did.
+  Always captured: clicks, typed text, checkbox/radio/select changes,
+  drag-and-drop (native and plain-mouse), Escape presses, debounced scroll
+  summaries, and page navigations. An opt-in checkbox adds hover-dwell and
+  Tab-focus logging for extra detail. **Copy** grabs the steps as text;
+  **Clear** resets. State lives in `sessionStorage`, so it survives
+  same-origin navigation but resets per tab.
 - **Toast notifications** — Small confirmations for every action.
 - **Floating, draggable panel** — Drag the panel anywhere on screen; its
   position is remembered.

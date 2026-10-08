@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QA Assistant for Redmine
 // @namespace    QA
-// @version      7.2.34
+// @version      8.0.0
 // @description  Report Redmine issues in any tracker with per-tracker templates, an AI report assistant, and a draggable/dockable panel.
 // @match        https://redmine.kernello.com/*
 // @match        https://dev.cloudapper.com/*
@@ -319,7 +319,11 @@ As a <role>, I want <goal> so that <benefit>.
             globe:                `<svg ${A}><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
             server:               `<svg ${A}><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>`,
             smartphone:           `<svg ${A}><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
-            android:              `<svg ${A}><path d="M17.5 15.5a5.5 5.5 0 1 0-11 0z"/><path d="M6.5 15.5v3.5"/><path d="M17.5 15.5v3.5"/><line x1="9" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="15" y2="12"/><path d="M7 9L5 6"/><path d="M17 9l2-3"/></svg>`
+            android:              `<svg ${A}><path d="M17.5 15.5a5.5 5.5 0 1 0-11 0z"/><path d="M6.5 15.5v3.5"/><path d="M17.5 15.5v3.5"/><line x1="9" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="15" y2="12"/><path d="M7 9L5 6"/><path d="M17 9l2-3"/></svg>`,
+
+            // Step recorder (launcher hosts)
+            "circle-dot":         `<svg ${A}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>`,
+            square:               `<svg ${A}><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/></svg>`
         };
     })();
     const svgIcon = (name) => QA_ICONS[name] || "";
@@ -2617,6 +2621,305 @@ As a <role>, I want <goal> so that <benefit>.
     }
 
     //////////////////////////////////////////////////////
+    // Step Recorder (launcher hosts only)
+    //////////////////////////////////////////////////////
+
+    // State lives in sessionStorage (not localStorage) — scoped to this tab +
+    // origin, so a recording survives navigations on the app under test but
+    // doesn't linger forever or leak across tabs.
+    const STEP_REC_ACTIVE_KEY   = "qa-steprec-active";
+    const STEP_REC_STEPS_KEY    = "qa-steprec-steps";
+    const STEP_REC_LAST_URL_KEY = "qa-steprec-lasturl";
+    // "Extra detail" = hover dwell + Tab-focus logging. Both are noisy by
+    // nature (a stray mouse pass-through or tab stop isn't really a "step"),
+    // so they're opt-in rather than always-on like click/type/drag/scroll.
+    const STEP_REC_EXTRA_KEY    = "qa-steprec-extra";
+
+    function stepRecIsActive() {
+        return sessionStorage.getItem(STEP_REC_ACTIVE_KEY) === "1";
+    }
+    function stepRecExtraEnabled() {
+        return sessionStorage.getItem(STEP_REC_EXTRA_KEY) === "1";
+    }
+    function stepRecLoadSteps() {
+        try { return JSON.parse(sessionStorage.getItem(STEP_REC_STEPS_KEY) || "[]"); }
+        catch (_) { return []; }
+    }
+    function stepRecSaveSteps(steps) {
+        sessionStorage.setItem(STEP_REC_STEPS_KEY, JSON.stringify(steps));
+    }
+    function stepRecAppend(text) {
+        const steps = stepRecLoadSteps();
+        steps.push(text);
+        stepRecSaveSteps(steps);
+        stepRecRenderIfMounted();
+    }
+    function stepRecInOwnPanel(el) {
+        const panel = document.getElementById("qa-panel");
+        return !!(panel && el && panel.contains(el));
+    }
+
+    // Finds a human-readable label for whatever the user interacted with —
+    // aria-label / title / associated <label> / placeholder / visible text,
+    // in that order, since any one of them may be missing.
+    function stepRecFindLabel(el) {
+        if (el.id) {
+            const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+            if (lbl) return lbl.textContent.trim().replace(/\s+/g, " ");
+        }
+        const parentLabel = el.closest("label");
+        if (parentLabel) return parentLabel.textContent.trim().replace(/\s+/g, " ");
+        return "";
+    }
+    function stepRecDescribeElement(el) {
+        if (!el) return "an element";
+        const aria = el.getAttribute && el.getAttribute("aria-label");
+        if (aria && aria.trim()) return `"${aria.trim()}"`;
+        const title = el.getAttribute && el.getAttribute("title");
+        if (title && title.trim()) return `"${title.trim()}"`;
+        if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") {
+            const placeholder = el.getAttribute("placeholder");
+            if (placeholder) return `the "${placeholder.trim()}" field`;
+            const label = stepRecFindLabel(el);
+            if (label) return `the "${label}" field`;
+            const name = el.getAttribute("name");
+            if (name) return `the "${name}" field`;
+            return "a field";
+        }
+        const text = (el.textContent || "").trim().replace(/\s+/g, " ");
+        if (text) return `"${text.slice(0, 60)}"`;
+        const alt = el.getAttribute && el.getAttribute("alt");
+        if (alt && alt.trim()) return `"${alt.trim()}"`;
+        return el.tagName ? el.tagName.toLowerCase() : "an element";
+    }
+
+    // Set right before a drag's final mouseup fires so the click handler
+    // (which fires immediately after) can skip logging a redundant "Clicked".
+    let qaStepRecSuppressClick = false;
+
+    function stepRecOnClick(e) {
+        if (!stepRecIsActive()) return;
+        if (stepRecInOwnPanel(e.target)) return;
+        if (qaStepRecSuppressClick) { qaStepRecSuppressClick = false; return; }
+        const el = e.target.closest("a, button, [role='button'], input, select, textarea, [onclick], li, [tabindex]") || e.target;
+        const desc = stepRecDescribeElement(el);
+        const opensMenu = el.getAttribute && (el.getAttribute("aria-haspopup") === "true" || el.hasAttribute("aria-expanded"));
+        const verb = opensMenu ? "Opened" : (el.tagName === "A" ? "Clicked the link" : "Clicked");
+        stepRecAppend(`${verb} ${desc}`);
+    }
+
+    function stepRecOnChange(e) {
+        if (!stepRecIsActive()) return;
+        const el = e.target;
+        if (stepRecInOwnPanel(el)) return;
+        if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && el.tagName !== "SELECT")) return;
+        if (el.type === "checkbox" || el.type === "radio") {
+            stepRecAppend(`${el.checked ? "Checked" : "Unchecked"} ${stepRecDescribeElement(el)}`);
+            return;
+        }
+        if (el.tagName === "SELECT") {
+            const opt = el.options[el.selectedIndex];
+            stepRecAppend(`Selected "${opt ? opt.text.trim() : el.value}" in ${stepRecDescribeElement(el)}`);
+            return;
+        }
+        if (!el.value) return;
+        stepRecAppend(`Typed "${el.value}" into ${stepRecDescribeElement(el)}`);
+    }
+
+    // Custom (non-native) drag-and-drop: most web apps implement dragging
+    // with plain mouse events rather than the HTML5 draggable attribute, so
+    // a real drag is told apart from a click by how far the pointer moved
+    // between mousedown and mouseup.
+    const QA_STEPREC_DRAG_THRESHOLD = 15; // px
+    let qaStepRecDragStart = null;
+
+    function stepRecOnMouseDown(e) {
+        if (!stepRecIsActive()) return;
+        if (stepRecInOwnPanel(e.target)) return;
+        qaStepRecDragStart = { x: e.clientX, y: e.clientY, el: e.target };
+    }
+    function stepRecOnMouseUp(e) {
+        if (!stepRecIsActive() || !qaStepRecDragStart) return;
+        const dx = e.clientX - qaStepRecDragStart.x;
+        const dy = e.clientY - qaStepRecDragStart.y;
+        const moved = Math.hypot(dx, dy);
+        if (moved >= QA_STEPREC_DRAG_THRESHOLD) {
+            const target = document.elementFromPoint(e.clientX, e.clientY);
+            stepRecAppend(`Dragged ${stepRecDescribeElement(qaStepRecDragStart.el)} onto ${stepRecDescribeElement(target)}`);
+            qaStepRecSuppressClick = true;
+        }
+        qaStepRecDragStart = null;
+    }
+
+    // Native HTML5 drag-and-drop (draggable="true" elements) — distinct from
+    // the mouse-based heuristic above, which only fires for non-native drags.
+    function stepRecOnDragStart(e) {
+        if (!stepRecIsActive() || stepRecInOwnPanel(e.target)) return;
+        stepRecAppend(`Started dragging ${stepRecDescribeElement(e.target)}`);
+    }
+    function stepRecOnDrop(e) {
+        if (!stepRecIsActive() || stepRecInOwnPanel(e.target)) return;
+        stepRecAppend(`Dropped onto ${stepRecDescribeElement(e.target)}`);
+    }
+
+    // Scroll events fire dozens of times per gesture — wait for the gesture
+    // to actually finish, then log one summary line instead of a flood.
+    let qaStepRecScrollTimer = null;
+    let qaStepRecScrollStartY = null;
+    function stepRecOnScroll(e) {
+        if (!stepRecIsActive()) return;
+        if (stepRecInOwnPanel(e.target)) return;
+        if (qaStepRecScrollStartY === null) qaStepRecScrollStartY = window.scrollY;
+        clearTimeout(qaStepRecScrollTimer);
+        qaStepRecScrollTimer = setTimeout(() => {
+            const delta = window.scrollY - qaStepRecScrollStartY;
+            qaStepRecScrollStartY = null;
+            if (Math.abs(delta) < 40) return; // ignore tiny/incidental scrolls
+            const atBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4;
+            const atTop = window.scrollY <= 4;
+            const desc = atBottom ? "Scrolled to the bottom of the page"
+                : atTop ? "Scrolled to the top of the page"
+                : (delta > 0 ? "Scrolled down" : "Scrolled up");
+            stepRecAppend(desc);
+        }, 400);
+    }
+
+    // Tab-focus logging is correlated against a recent Tab keydown so a
+    // mouse-click focus change (already logged by stepRecOnClick) doesn't
+    // also get double-logged here.
+    let qaStepRecLastTabTime = 0;
+    function stepRecOnKeyDown(e) {
+        if (!stepRecIsActive()) return;
+        if (stepRecInOwnPanel(e.target)) return;
+        if (e.key === "Tab") { qaStepRecLastTabTime = Date.now(); return; }
+        if (e.key === "Escape") { stepRecAppend("Pressed Escape"); }
+    }
+    function stepRecOnFocusIn(e) {
+        if (!stepRecIsActive() || !stepRecExtraEnabled()) return;
+        if (stepRecInOwnPanel(e.target)) return;
+        if (Date.now() - qaStepRecLastTabTime > 400) return; // focus wasn't from Tab
+        stepRecAppend(`Tabbed to ${stepRecDescribeElement(e.target)}`);
+    }
+
+    // Hover dwell: mouseover fires constantly as the cursor passes over
+    // anything, so only a genuinely interactive element the cursor actually
+    // stops on (not passes through) gets logged.
+    const QA_STEPREC_HOVER_DWELL_MS = 1200;
+    let qaStepRecHoverTimer = null;
+    let qaStepRecHoverTarget = null;
+    function stepRecOnMouseOver(e) {
+        if (!stepRecIsActive() || !stepRecExtraEnabled()) return;
+        if (stepRecInOwnPanel(e.target)) return;
+        const el = e.target.closest("a, button, [role='button'], [title], [aria-haspopup], [data-tooltip]");
+        if (!el || el === qaStepRecHoverTarget) return;
+        qaStepRecHoverTarget = el;
+        clearTimeout(qaStepRecHoverTimer);
+        qaStepRecHoverTimer = setTimeout(() => {
+            if (qaStepRecHoverTarget === el) stepRecAppend(`Hovered ${stepRecDescribeElement(el)}`);
+        }, QA_STEPREC_HOVER_DWELL_MS);
+    }
+    function stepRecOnMouseOut(e) {
+        if (e.target === qaStepRecHoverTarget) {
+            clearTimeout(qaStepRecHoverTimer);
+            qaStepRecHoverTarget = null;
+        }
+    }
+
+    // Called once per page load — if recording carried over from the
+    // previous page, log the navigation as its own step.
+    function stepRecCheckNavigation() {
+        if (!stepRecIsActive()) return;
+        const lastUrl = sessionStorage.getItem(STEP_REC_LAST_URL_KEY);
+        if (lastUrl !== location.href) {
+            stepRecAppend(`Opened ${location.href}`);
+            sessionStorage.setItem(STEP_REC_LAST_URL_KEY, location.href);
+        }
+    }
+
+    function installStepRecorderListeners() {
+        document.addEventListener("click", stepRecOnClick, true);
+        document.addEventListener("change", stepRecOnChange, true);
+        document.addEventListener("mousedown", stepRecOnMouseDown, true);
+        document.addEventListener("mouseup", stepRecOnMouseUp, true);
+        document.addEventListener("dragstart", stepRecOnDragStart, true);
+        document.addEventListener("drop", stepRecOnDrop, true);
+        document.addEventListener("scroll", stepRecOnScroll, true);
+        document.addEventListener("keydown", stepRecOnKeyDown, true);
+        document.addEventListener("focusin", stepRecOnFocusIn, true);
+        document.addEventListener("mouseover", stepRecOnMouseOver, true);
+        document.addEventListener("mouseout", stepRecOnMouseOut, true);
+    }
+
+    function stepRecRenderIfMounted() {
+        const ta = document.getElementById("qa-steprec-steps");
+        if (!ta) return;
+        const steps = stepRecLoadSteps();
+        ta.value = steps.map((s, i) => (i + 1) + ". " + s).join("\n");
+        ta.scrollTop = ta.scrollHeight;
+        const output = document.getElementById("qa-steprec-output");
+        if (output) output.hidden = steps.length === 0;
+    }
+
+    // Wires the toggle/extra-detail/copy/clear controls — called once from
+    // createPanel() on launcher hosts only.
+    function wireStepRecorderUI(panel) {
+        const toggleBtn = panel.querySelector('[data-action="steprec-toggle"]');
+        const toggleLabel = panel.querySelector("#qa-steprec-toggle-label");
+        const toggleIcon = panel.querySelector("#qa-steprec-icon");
+        const extraCheckbox = panel.querySelector("#qa-steprec-extra");
+        const copyBtn = panel.querySelector('[data-action="steprec-copy"]');
+        const clearBtn = panel.querySelector('[data-action="steprec-clear"]');
+        if (!toggleBtn) return;
+
+        function refreshToggleUI() {
+            const active = stepRecIsActive();
+            toggleBtn.classList.toggle("qa-danger", active);
+            toggleBtn.classList.toggle("qa-recording", active);
+            toggleLabel.textContent = active ? "Stop Recording" : "Start Recording";
+            toggleIcon.innerHTML = svgIcon(active ? "square" : "circle-dot");
+            toggleBtn.title = active
+                ? "Stop recording steps"
+                : "Record clicks, typed text, drags, scrolls, and page navigations as plain-English steps";
+        }
+
+        toggleBtn.addEventListener("click", () => {
+            if (stepRecIsActive()) {
+                sessionStorage.setItem(STEP_REC_ACTIVE_KEY, "0");
+                toast("Recording stopped");
+            } else {
+                stepRecSaveSteps([]);
+                sessionStorage.setItem(STEP_REC_LAST_URL_KEY, location.href);
+                sessionStorage.setItem(STEP_REC_ACTIVE_KEY, "1");
+                toast("Recording started");
+            }
+            refreshToggleUI();
+            stepRecRenderIfMounted();
+        });
+
+        extraCheckbox.checked = stepRecExtraEnabled();
+        extraCheckbox.addEventListener("change", () => {
+            sessionStorage.setItem(STEP_REC_EXTRA_KEY, extraCheckbox.checked ? "1" : "0");
+        });
+
+        copyBtn.addEventListener("click", async () => {
+            const steps = stepRecLoadSteps();
+            if (!steps.length) { toast("Nothing recorded yet"); return; }
+            const text = steps.map((s, i) => (i + 1) + ". " + s).join("\n");
+            try { await navigator.clipboard.writeText(text); toast("Steps copied"); }
+            catch (_) { toast("Copy failed — clipboard blocked"); }
+        });
+
+        clearBtn.addEventListener("click", () => {
+            stepRecSaveSteps([]);
+            stepRecRenderIfMounted();
+            toast("Steps cleared");
+        });
+
+        refreshToggleUI();
+        stepRecRenderIfMounted();
+    }
+
+    //////////////////////////////////////////////////////
     // Floating Panel
     //////////////////////////////////////////////////////
 
@@ -2883,6 +3186,26 @@ As a <role>, I want <goal> so that <benefit>.
                     </div>
                 </div>` : "";
 
+        // Step Recorder — launcher hosts only (the app under test), not
+        // Redmine itself. See the "Step Recorder" section above for the logic.
+        const stepRecorderHtml = !onRedmine ? `
+                <div class="qa-divider"></div>
+                <div class="qa-section-label">Step Recorder</div>
+                <div class="qa-reopened-row">
+                    <button class="qa-btn qa-tmpl-btn qa-action qa-steprec-toggle" data-action="steprec-toggle" id="qa-steprec-toggle" type="button"><span class="qa-btn-icon" id="qa-steprec-icon">${svgIcon("circle-dot")}</span><span class="qa-btn-label" id="qa-steprec-toggle-label">Start Recording</span></button>
+                </div>
+                <label class="qa-steprec-extra-toggle" for="qa-steprec-extra">
+                    <input type="checkbox" id="qa-steprec-extra">
+                    <span>Also capture hovers &amp; tab focus (more detail, more noise)</span>
+                </label>
+                <div class="qa-steprec-output" id="qa-steprec-output" hidden>
+                    <textarea id="qa-steprec-steps" class="qa-template-input" readonly rows="6" placeholder="Recorded steps will appear here…"></textarea>
+                    <div class="qa-template-actions">
+                        <button class="qa-btn qa-tmpl-btn" data-action="steprec-copy" type="button"><span class="qa-btn-icon">${svgIcon("copy")}</span><span class="qa-btn-label">Copy</span></button>
+                        <button class="qa-btn qa-tmpl-btn qa-danger" data-action="steprec-clear" type="button"><span class="qa-btn-icon">${svgIcon("trash-2")}</span><span class="qa-btn-label">Clear</span></button>
+                    </div>
+                </div>` : "";
+
         // View-only modal that displays the reopened-issues result set.
         // Same overlay chrome as the bulk-close modal (theme, close X,
         // list styling) but no confirm button, no note, no version —
@@ -2993,6 +3316,7 @@ As a <role>, I want <goal> so that <benefit>.
                 ${bulkCloseHtml}
                 ${reopenedIssuesHtml}
                 ${auditWrapHtml}
+                ${stepRecorderHtml}
                 <div class="qa-divider"></div>
                 <div class="qa-section-label">Agile Boards</div>
                 <div class="qa-boards-row" id="qa-boards-wrap">
@@ -4861,6 +5185,8 @@ As a <role>, I want <goal> so that <benefit>.
             }
         });
         applyAccent(panel, getAccent());
+
+        if (!onRedmine) wireStepRecorderUI(panel);
 
         restorePanelState(panel);
         wireQuoteBubble(panel);
@@ -6817,6 +7143,27 @@ As a <role>, I want <goal> so that <benefit>.
 }
 .qa-reopened-row .qa-tmpl-btn{
     flex:1 1 auto;
+}
+/* Step Recorder (launcher hosts only). */
+.qa-steprec-extra-toggle{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    margin:6px 2px 2px;
+    font-size:11px;
+    color:var(--qa-muted);
+    cursor:pointer;
+    user-select:none;
+}
+.qa-steprec-extra-toggle input{ cursor:pointer; }
+.qa-steprec-output{ margin-top:8px; }
+@keyframes qa-steprec-pulse{
+    0%,100%{ opacity:1; }
+    50%    { opacity:.4; }
+}
+.qa-steprec-toggle.qa-recording .qa-btn-icon{ animation:qa-steprec-pulse 1.1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce){
+    .qa-steprec-toggle.qa-recording .qa-btn-icon{ animation:none; }
 }
 /* Loader state — while '#qa-show-reopened.qa-loading' is applied by the
    click handler, spin the button's icon so users get an unambiguous
@@ -10369,6 +10716,10 @@ a.qa-board-daily-chip:hover{ text-decoration:underline; }
         observeRelatedIssues();
         installAttachmentLightbox();
         observeBoardDailyReport();
+        if (location.origin !== REDMINE) {
+            stepRecCheckNavigation();
+            installStepRecorderListeners();
+        }
     }
 
     // Tampermonkey may inject before OR after the page finishes loading. Relying
